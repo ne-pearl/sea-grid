@@ -1,6 +1,5 @@
-# sea-grid
-
-ARROW Summer Education Accelerator
+WIP
+===
 
 # Getting started
 
