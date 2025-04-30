@@ -1,4 +1,5 @@
 import math
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -76,24 +77,24 @@ model.total_cost = pyo.Objective(
 )
 
 
-def network_incidence(n: int, ell: int) -> float:
+def network_incidence(n: int, ell: int) -> int:
     if nodes[n, "id"] == lines[ell, "from_node_id"]:
-        return -1.0
+        return -1
     if nodes[n, "id"] == lines[ell, "to_node_id"]:
-        return +1.0
+        return +1
     else:
-        return 0.0
+        return 0
 
 
-def supply_incidence(n: int, g: int, o: int) -> float:
+def supply_incidence(n: int, g: int, o: int) -> bool:
     node_generator: bool = nodes[n, "id"] == generators[g, "node_id"]
     generator_offer: bool = generators[g, "id"] == offers[o, "generator_id"]
-    return float(node_generator and generator_offer)
+    return node_generator and generator_offer
 
 
 def balance_rule(model: Model, n: int) -> EqualityExpression:
     return (
-        sum(supply_incidence(n, g, o) * model.p[o] for g in Generators for o in Offers)
+        sum(model.p[o] for g in Generators for o in Offers if supply_incidence(n, g, o))
         + sum(network_incidence(n, ell) * model.f[ell] for ell in Lines)
         == nodes[n, "load"]
     )
@@ -103,10 +104,11 @@ def flow_rule(model: Model, ell: int) -> EqualityExpression:
     return (
         sum(
             base_power
-            * network_incidence(n, ell)
+            * sign
             * lines[ell, "susceptance"]
             * model.theta[n]
             for n in Nodes
+            if (sign := network_incidence(n, ell))
         )
         == model.f[ell]
     )
@@ -147,19 +149,9 @@ print("lines -", lines)
 print("nodes -", nodes)
 print("generators -", generators)
 
-network = nx.DiGraph()
 
-
-def tags(column, value) -> list:
-    return [value for _ in column]
-
-
-def vertex_labels(df, column, values, template="{}") -> dict:
-    return dict(zip(df[column], map(template.format, df[values])))
-
-
-def edge_labels(df, left, right, values, template="{}") -> dict:
-    return dict(zip(zip(df[left], df[right]), map(template.format, df[values])))
+def mapvalues(f, keys, *values) -> dict:
+    return dict(zip(keys, map(f, *values)))
 
 
 def offset(pos: dict, dx: float, dy: float) -> dict:
@@ -167,35 +159,53 @@ def offset(pos: dict, dx: float, dy: float) -> dict:
     return {node: xy + dxy for node, xy in pos.items()}
 
 
+network = nx.DiGraph()
+
 network.add_nodes_from(nodes["id"])
 network.add_nodes_from(generators["id"])
-bus_color = tags(nodes["id"], "lightblue")
-generator_color = tags(generators["id"], "lightgreen")
+bus_color = ["lightblue" for _ in nodes["id"]]
+generator_color = ["lightgreen" for _ in generators["id"]]
 node_color = bus_color + generator_color
 
 network.add_edges_from(zip(lines["from_node_id"], lines["to_node_id"]))
 network.add_edges_from(zip(generators["id"], generators["node_id"]))
-line_color = tags(lines["from_node_id"], "black")
-connection_color = tags(generators["id"], "gray")
-edge_color = line_color + connection_color
+# line_color = tags(lines["from_node_id"], "black")
+# connection_color = tags(generators["id"], "gray")
+# edge_color = line_color + connection_color
 
-nodal_price_labels = vertex_labels(nodes, "id", "price", "${:.2f}/MWh")
-offer_price_labels = vertex_labels(generators, "id", "prices", "${:}/MWh")
-flow_labels = edge_labels(lines, "from_node_id", "to_node_id", "flow", "{:.0f}MW")
-supply_labels = edge_labels(generators, "id", "node_id", "supply", "{:.0f}MW")
+nodal_price_labels = mapvalues("${:.2f}/MWh".format, nodes["id"], nodes["price"])
+offer_price_labels = mapvalues(
+    "${:}/MWh".format, generators["id"], generators["prices"]
+)
+flow_labels = mapvalues(
+    "{:.0f}MW/{:.0f}MW".format,
+    zip(lines["from_node_id"], lines["to_node_id"]),
+    lines["flow"],
+    lines["capacity"],
+)
+supply_labels = mapvalues(
+    "{:.0f}MW".format,
+    zip(generators["id"], generators["node_id"]),
+    generators["supply"],
+)
+line_utilization = lines["flow"].abs() / lines["capacity"]
+connection_utilization = [0.0 for _ in generators["id"]]
+edge_utilization = [*line_utilization, *connection_utilization]
 
 options = dict(
     with_labels=True,
     node_color=node_color,
-    # node_size=4000,
-    edge_color=edge_color,
+    edge_color=edge_utilization,
+    edge_cmap=cm.cool,
+    edge_vmin=0.0,
+    edge_vmax=1.0,
 )
 
 pos = nx.spring_layout(network, k=3 / math.sqrt(network.number_of_nodes()), seed=0)
 nx.draw_networkx(network, pos, **options)
 nx.draw_networkx_labels(
     network,
-    offset(pos, 0, -0.15),
+    offset(pos, 0, -0.1),
     labels=nodal_price_labels | offer_price_labels,
     font_size=9,
 )
