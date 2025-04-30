@@ -1,33 +1,30 @@
-FROM julia:1.11-slim
+# Base Julia image
+FROM julia:1.11.5-bullseye
 
-# Install Python + JupyterLab using pip (bypass Debian PEP 668 warning)
-RUN apt-get update && \
-    apt-get install -y python3 python3-pip && \
-    pip3 install --break-system-packages jupyterlab ipykernel
+# Install Python + JupyterLab in a venv (avoids Debian pip restrictions)
+RUN apt-get update && apt-get install -y python3 python3-venv python3-pip && \
+    python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Set working directory
-WORKDIR /home/jovyan
+# Install JupyterLab and IPython kernel
+RUN pip install --no-cache-dir notebook jupyterlab ipykernel
 
-# Copy your repo contents
-COPY . /home/jovyan
+# Install Julia dependencies (assumes Project.toml and Manifest.toml are in the repo)
+COPY Project.toml Manifest.toml ./
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 
-# Instantiate your Julia environment
-RUN julia --project=. -e 'using Pkg; Pkg.instantiate()'
-
-# (Optional) Precompile to reduce kernel start time — but increases image size
-# RUN julia --project=. -e 'using Pkg; Pkg.precompile()'
-
-# Register the Julia kernel
+# Install IJulia and register kernel (uses project environment)
 RUN julia --project=. -e 'using IJulia; IJulia.installkernel("Julia")'
 
-# Clean up to reduce image size
-RUN rm -rf ~/.julia/compiled \
-    ~/.julia/logs \
-    ~/.julia/packages/*/.git \
-    /var/lib/apt/lists/* \
-    /tmp/* \
-    /root/.cache \
-    /root/.julia/compiled
+# Copy rest of repository (notebooks, code, data, etc.)
+COPY . .
 
-# Launch JupyterLab
+# Optional cleanup to reduce image size
+RUN rm -rf /root/.julia/logs \
+    /root/.julia/packages/*/.git \
+    /root/.cache \
+    /var/lib/apt/lists/* \
+    /tmp/*
+
+# Default command for Binder
 CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--allow-root"]
