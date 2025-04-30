@@ -1,30 +1,27 @@
+# Dockerfile for Binder + local use (Python version)
 FROM python:3.11-slim
+
+# Avoid interactive prompts during installs
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    curl \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages
-RUN pip install --no-cache-dir \
-    jupyterlab \
-    pyomo \
-    networkx \
-    polars
+# Upgrade pip and install Python packages
+COPY requirements.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Set working directory
+# Set working directory and copy repo contents
 WORKDIR /home/jovyan
-
-# Copy everything into the image
 COPY . /home/jovyan
 
-# Expose the port for Jupyter (useful locally)
+# Expose default Jupyter port
 EXPOSE 8888
 
-# Start JupyterLab if running locally
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--no-browser", "--allow-root"]
+# Launch JupyterLab (Binder will override this CMD)
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
 
 #
 # To run locally:

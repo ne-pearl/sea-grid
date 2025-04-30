@@ -1,6 +1,7 @@
+highspy
 ipykernel
-jupyter
+jupyterlab
 matplotlib
-numpy
-pandas
-seaborn
+networkx
+polars
+pyomo

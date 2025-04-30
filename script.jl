@@ -95,18 +95,37 @@ optimize!(model)
 # Select backend: https://gr-framework.org/
 Plots.gr()
 
-g = Graphs.DiGraph(length([axis(nodes)..., axis(generators)]))
 
+num_nodes = size(nodes, 1)
+num_generators = size(generators, 1)
+g = Graphs.DiGraph(num_nodes + num_generators)
 edgelabel = Dict()
+vertexlabel = Dict()
+
+for node = eachrow(nodes)
+    vertexlabel[length(vertexlabel)] = "node $(node.id)"
+end
+
+for generator = eachrow(generators)
+    vertexlabel[length(vertexlabel)] = "gen $(generator.id)"
+end
+
 for line = eachrow(lines)
     Graphs.add_edge!(g, line.from_node_id, line.to_node_id)
-    edgelabel[line.from_node_id, line_to_node_id] = "line $id"
+    edgelabel[line.from_node_id, line.to_node_id] = "line $(line.id)"
+end
+
+for generator = eachrow(generators)
+    vertex_id = num_nodes + generator.id
+    Graphs.add_edge!(g, vertex_id, generator.node_id)
+    edgelabel[vertex_id, generator.node_id] = ""
 end
 
 plot = GraphRecipes.graphplot(
     g;
     names=1:nv(g),
     edgelabel=edgelabel,
+    vertexlabel=vertexlabel,
     method=:spring,
     nodeshape=:circle,
     nodesize=0.3,
