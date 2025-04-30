@@ -4,6 +4,7 @@ FROM julia:1.11
 RUN julia -e 'using Pkg; Pkg.add(["IJulia"]); Pkg.precompile()'
 
 # Install Jupyter and create a kernel
+RUN apt-get update && apt-get install -y python3 python3-venv python3-pip
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install notebook ipykernel
