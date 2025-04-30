@@ -1,30 +1,33 @@
-# Base Julia image
-FROM julia:1.11.5-bullseye
+FROM python:3.11-slim
 
-# Install Python + JupyterLab in a venv (avoids Debian pip restrictions)
-RUN apt-get update && apt-get install -y python3 python3-venv python3-pip && \
-    python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install JupyterLab and IPython kernel
-RUN pip install --no-cache-dir notebook jupyterlab ipykernel
+# Install Python packages
+RUN pip install --no-cache-dir \
+    jupyterlab \
+    pyomo \
+    networkx \
+    polars
 
-# Install Julia dependencies (assumes Project.toml and Manifest.toml are in the repo)
-COPY Project.toml Manifest.toml ./
-RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+# Set working directory
+WORKDIR /home/jovyan
 
-# Install IJulia and register kernel (uses project environment)
-RUN julia --project=. -e 'using IJulia; IJulia.installkernel("Julia")'
+# Copy everything into the image
+COPY . /home/jovyan
 
-# Copy rest of repository (notebooks, code, data, etc.)
-COPY . .
+# Expose the port for Jupyter (useful locally)
+EXPOSE 8888
 
-# Optional cleanup to reduce image size
-RUN rm -rf /root/.julia/logs \
-    /root/.julia/packages/*/.git \
-    /root/.cache \
-    /var/lib/apt/lists/* \
-    /tmp/*
+# Start JupyterLab if running locally
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--no-browser", "--allow-root"]
 
-# Default command for Binder
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--allow-root"]
+#
+# To run locally:
+# $ docker build -t my-pyomo-env .
+# $ docker run -p 8888:8888 -v "$PWD":/home/jovyan my-pyomo-env
+#

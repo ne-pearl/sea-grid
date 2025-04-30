@@ -1,7 +1,6 @@
-import CSV
-import HiGHS
 using DataFrames: DataFrame
-using JuMP
+using JuMP, HiGHS
+using Graphs, Plots, GraphRecipes
 
 axis(a) = axes(a, 1)
 
@@ -92,3 +91,27 @@ optimize!(model)
 @show f_star = value.(f)
 @show θ_star_deg = value.(θ) .* 180 ./ π
 @show prices = dual.(balance)
+
+# Select backend: https://gr-framework.org/
+Plots.gr()
+
+g = Graphs.DiGraph(length([axis(nodes)..., axis(generators)]))
+
+edgelabel = Dict()
+for line = eachrow(lines)
+    Graphs.add_edge!(g, line.from_node_id, line.to_node_id)
+    edgelabel[line.from_node_id, line_to_node_id] = "line $id"
+end
+
+plot = GraphRecipes.graphplot(
+    g;
+    names=1:nv(g),
+    edgelabel=edgelabel,
+    method=:spring,
+    nodeshape=:circle,
+    nodesize=0.3,
+    nodecolor=:cornflowerblue,
+    fontsize=12
+)
+
+display(plot)
