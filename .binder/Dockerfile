@@ -1,22 +1,33 @@
-FROM julia:1.11
+FROM julia:1.11-slim
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y python3 python3-pip
-
-# Install Jupyter and the kernel machinery (bypassing Debian restrictions)
-RUN pip3 install --break-system-packages notebook jupyterlab ipykernel
+# Install Python + JupyterLab using pip (bypass Debian PEP 668 warning)
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip && \
+    pip3 install --break-system-packages jupyterlab ipykernel
 
 # Set working directory
 WORKDIR /home/jovyan
 
-# Copy your repo contents into the container
+# Copy your repo contents
 COPY . /home/jovyan
 
-# Instantiate and precompile your Julia environment
-RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+# Instantiate your Julia environment
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+# (Optional) Precompile to reduce kernel start time — but increases image size
+# RUN julia --project=. -e 'using Pkg; Pkg.precompile()'
 
 # Register the Julia kernel
 RUN julia --project=. -e 'using IJulia; IJulia.installkernel("Julia")'
 
-# Launch JupyterLab instead of classic notebook
+# Clean up to reduce image size
+RUN rm -rf ~/.julia/compiled \
+    ~/.julia/logs \
+    ~/.julia/packages/*/.git \
+    /var/lib/apt/lists/* \
+    /tmp/* \
+    /root/.cache \
+    /root/.julia/compiled
+
+# Launch JupyterLab
 CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--allow-root"]
