@@ -19,4 +19,4 @@ RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 RUN julia --project=. -e 'using IJulia; IJulia.installkernel("Julia")'
 
 # Launch Jupyter notebook server
-CMD ["jupyter", "notebook", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--allow-root"]
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--allow-root"]
