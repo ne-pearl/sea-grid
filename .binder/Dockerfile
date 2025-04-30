@@ -1,22 +1,22 @@
 FROM julia:1.11
 
-# Create a Python virtual environment
-RUN apt-get update && apt-get install -y python3 python3-pip python3-venv
-RUN python3 -m venv /opt/venv
+# Install Python and pip (needed for Jupyter in Binder)
+RUN apt-get update && apt-get install -y python3 python3-pip
 
-# Activate venv and install Jupyter
-ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install notebook ipykernel
+# Install Jupyter components
+RUN pip3 install notebook ipykernel
 
-# Install Julia packages (non-interactive)
-COPY Project.toml Manifest.toml ./
-RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-
-# Register Julia kernel inside venv
-RUN julia --project=. -e 'using IJulia; IJulia.installkernel("Julia", env=Base.current_project())'
-
-# Set working directory and copy repo contents
+# Set the working directory
 WORKDIR /home/jovyan
+
+# Copy your repository contents into the image
 COPY . /home/jovyan
 
-CMD ["jupyter", "notebook", "--ip=0.0.0.0", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--allow-root"]
+# Instantiate and precompile your Julia environment
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+# Register the Julia kernel with Jupyter
+RUN julia --project=. -e 'using IJulia; IJulia.installkernel("Julia")'
+
+# Launch Jupyter notebook server
+CMD ["jupyter", "notebook", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--allow-root"]
