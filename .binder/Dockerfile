@@ -1,25 +1,22 @@
 FROM julia:1.11
 
-# Install Python and Jupyter (Binder needs this)
-RUN apt-get update && \
-    apt-get install -y python3 python3-pip python3-venv && \
-    python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir notebook ipykernel && \
-    rm -rf /var/lib/apt/lists/*
+# Create a Python virtual environment
+RUN apt-get update && apt-get install -y python3 python3-pip python3-venv
+RUN python3 -m venv /opt/venv
 
+# Activate venv and install Jupyter
 ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install notebook ipykernel
 
-# Set working directory
-WORKDIR /home/jovyan
-
-# Copy only the Julia environment files first to leverage Docker layer caching
+# Install Julia packages (non-interactive)
 COPY Project.toml Manifest.toml ./
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 
-# Instantiate only declared dependencies (including IJulia) — no global add
-RUN julia --compile=min --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); Pkg.gc();'
+# Register Julia kernel inside venv
+RUN julia --project=. -e 'using IJulia; IJulia.installkernel("Julia", env=Base.current_project())'
 
-# Then copy the rest of the repo
-COPY . .
+# Set working directory and copy repo contents
+WORKDIR /home/jovyan
+COPY . /home/jovyan
 
-# Register the IJulia kernel (already installed via project)
-RUN julia --compile=min --project=. -e 'using IJulia; installkernel("Julia")'
+CMD ["jupyter", "notebook", "--ip=0.0.0.0", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--allow-root"]
