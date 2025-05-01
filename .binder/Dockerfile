@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Upgrade pip and install Python packages
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN rm -rf ~/.cache
 
 # Set working directory and copy repo contents
 WORKDIR /home/jovyan
