@@ -1,3 +1,4 @@
+import copy
 import math
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -64,6 +65,14 @@ def flow_bounds(model: Model, ell: int) -> tuple[float, float]:
     return (-capacity, +capacity)
 
 
+# Parameters
+model.loads = pyo.Param(
+    Buses, initialize={b: buses[b, "load"] for b in Buses}, mutable=True
+)
+model.susceptances = pyo.Param(
+    Lines, initialize={ell: lines[ell, "susceptance"] for ell in Lines}
+)
+
 # Variables
 model.p = pyo.Var(Offers, bounds=supply_bounds)
 model.f = pyo.Var(Lines, bounds=flow_bounds)
@@ -95,18 +104,17 @@ def supply_incidence(b: int, g: int, o: int) -> bool:
 def balance_rule(model: Model, b: int) -> EqualityExpression:
     return (
         sum(model.p[o] for g in Generators for o in Offers if supply_incidence(b, g, o))
-        + sum(network_incidence(b, ell) * model.f[ell] for ell in Lines)
-        == buses[b, "load"]
+        + sum(
+            sign * model.f[ell] for ell in Lines if (sign := network_incidence(b, ell))
+        )
+        == model.loads[b]
     )
 
 
 def flow_rule(model: Model, ell: int) -> EqualityExpression:
     return (
         sum(
-            base_power
-            * sign
-            * lines[ell, "susceptance"]
-            * model.theta[b]
+            base_power * sign * model.susceptances[b] * model.theta[b]
             for b in Buses
             if (sign := network_incidence(b, ell))
         )
@@ -120,15 +128,18 @@ model.reference_angle = pyo.Constraint(expr=model.theta[0] == 0.0)
 
 solver = pyo.SolverFactory("highs")
 results = solver.solve(model, tee=True)  # tee output to console
+print(results)
 
 supply = [pyo.value(model.p[o]) for o in Offers]
 flow = [pyo.value(model.f[ell]) for ell in Lines]
 angles_deg = [pyo.value(model.theta[b]) * 180 / math.pi for b in Buses]
-prices = [model.dual[model.balance[b]] for b in Buses]
+marginal_prices = [model.dual[model.balance[b]] for b in Buses]
 
 offers = offers.with_columns([Series("supply", supply)])
 lines = lines.with_columns([Series("flow", flow)])
-buses = buses.with_columns([Series("theta_deg", angles_deg), Series("price", prices)])
+buses = buses.with_columns(
+    [Series("theta_deg", angles_deg), Series("price", marginal_prices)]
+)
 
 supply_prices = offers.group_by("generator_id").agg(col("price"))
 supply_totals = offers.group_by("generator_id").agg(col("supply").sum())
@@ -148,6 +159,19 @@ print("offers -", offers)
 print("lines -", lines)
 print("buses -", buses)
 print("generators -", generators)
+
+
+def marginal_price_estimate(model, b, delta_load=1.0):
+    model_perturbed = copy.deepcopy(model)
+    model_perturbed.loads[b] += delta_load
+    solver.solve(model_perturbed, tee=True)
+    f_model = pyo.value(model.total_cost)
+    f_perturbed = pyo.value(model_perturbed.total_cost)
+    return (f_perturbed - f_model) / delta_load
+
+
+marginal_price_estimates = [marginal_price_estimate(model, b) for b in Buses]
+print(f"marginal_price_estimates = {marginal_price_estimates}")
 
 
 def mapvalues(f, keys, *values) -> dict:
