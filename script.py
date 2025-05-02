@@ -11,11 +11,11 @@ import pyomo.environ as pyo
 from pyomo.core import Model
 from pyomo.core.expr.relational_expr import EqualityExpression
 
+# Units of measure ===========================================================
 Id: TypeAlias = pl.String
 MW: TypeAlias = pl.Float64
 MWPerRad: TypeAlias = pl.Float64
 USDPerMWh: TypeAlias = pl.Float64
-font_size = 8
 
 # Network data ===============================================================
 buses = pl.DataFrame(
@@ -53,6 +53,9 @@ offers = pl.DataFrame(
         {"generator_id": "G1", "max_quantity": 100.0, "price": 20.00},
         {"generator_id": "G2", "max_quantity": 100.0, "price": 22.00},
         {"generator_id": "G3", "max_quantity": 100.0, "price": 24.00},
+        {"generator_id": "G1", "max_quantity": 200.0, "price": 15.00},
+        {"generator_id": "G2", "max_quantity": 200.0, "price": 16.00},
+        {"generator_id": "G3", "max_quantity": 200.0, "price": 17.00},
     ],
     schema={"id": Id, "generator_id": Id, "max_quantity": MW, "price": USDPerMWh},
 ).sort(by=["generator_id", "price"])
@@ -232,48 +235,32 @@ def hybrid_layout(
     return nx.spring_layout(G, pos=pos, fixed=hubs, seed=seed, k=k)
 
 
-def offset(positions: dict, dx: float, dy: float) -> dict:
-    """To adjust nodal positions"""
-    dxy = np.array([dx, dy])
-    return {id: xy + dxy for id, xy in positions.items()}
-
-
 # Network definition for plotting =============================================
 network = nx.DiGraph()
 
-network.add_nodes_from(buses["id"])
-network.add_nodes_from(offers["id"])
-
-load_norm = mc.Normalize(vmin=min(buses["load"]), vmax=max(buses["load"]))
-load_cmap = cm.coolwarm  # Or plasma, inferno, magma, coolwarm, etc.
-# bus_colors = [load_cmap(load_norm(load)) for load in buses["load"]]
-bus_colors = ["white" for load in buses["load"]]
-
-generator_cmap = plt.get_cmap(name="tab10", lut=generators.height)
-generator_colors = {
-    gid: mc.to_hex(generator_cmap(i)) for i, gid in enumerate(generators["id"])
-}
-offer_colors = [generator_colors[gid] for gid in offers["generator_id"]]
-# offer_colors = ["lightgreen" for gid in offers["generator_id"]]
-
-# bus_color = ["lightblue" for _ in buses["id"]]
-# generator_color = ["lightgreen" for _ in generators["id"]]
-node_color = bus_colors + offer_colors
-
-network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
-network.add_edges_from(zip(offers["id"], offers["node_id"]))
-line_color = lines["utilization"]
-connection_color = offers["utilization"]
-edge_color = [*line_color, *connection_color]
-
+# Node defnition ==============================================================
 bus_price_labels = mapvalues(
     "{:}MW\n@ ${:.2f}/MWh".format, buses["id"], buses["load"], buses["price"]
 )
 offer_price_labels = mapvalues(
     "{:}MW\n@ ${:}/MWh".format, offers["id"], offers["max_quantity"], offers["price"]
 )
+load_norm = mc.Normalize(vmin=min(buses["load"]), vmax=max(buses["load"]))
+load_cmap = cm.coolwarm  # Or plasma, inferno, magma, coolwarm, etc.
+bus_colors = [load_cmap(load_norm(load)) for load in buses["load"]]
+bus_colors = ["lightblue" for load in buses["load"]]
+
+generator_cmap = plt.get_cmap(name="tab10", lut=generators.height)
+generator_colors = {
+    gid: mc.to_hex(generator_cmap(i)) for i, gid in enumerate(generators["id"])
+}
+offer_colors = [generator_colors[gid] for gid in offers["generator_id"]]
+
+network.add_nodes_from(buses["id"])
+network.add_nodes_from(offers["id"])
 node_labels = bus_price_labels | offer_price_labels
 
+# Edge defnition =============================================================
 flow_labels = mapvalues(
     "{:.0f}MW/{:.0f}MW".format,
     zip(lines["from_bus_id"], lines["to_bus_id"]),
@@ -286,49 +273,60 @@ supply_labels = mapvalues(
     offers["supply"],
     offers["max_quantity"],
 )
-line_utilization = lines["flow"].abs() / lines["capacity"]
-connection_utilization = offers["supply"] / offers["max_quantity"]
-edge_utilization = [*line_utilization, *connection_utilization]
+network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
+network.add_edges_from(zip(offers["id"], offers["node_id"]))
+edge_utilization = [*lines["utilization"], *offers["utilization"]]
+edge_labels = flow_labels | supply_labels
 
-multiedge_sep_rad = 0.2
-max_num_offers = (
-    offers.group_by("generator_id")
-    .agg(pl.len().alias("count"))
-    .select(pl.col("count").max())
-    .item()
-)
-connectionstyle = [
-    f"arc3,rad={r}" for r in itertools.accumulate([multiedge_sep_rad] * max_num_offers)
-]
-line_labels = zip(lines["from_bus_id"], lines["to_bus_id"])
-connection_labels = zip(offers["generator_id"], offers["node_id"])
-
+# Network layout =============================================================
 scale = 20.0
-pos = hybrid_layout(network, scale=scale, k=scale * 1.0)
-nx.draw_networkx_nodes(network, pos, node_color=node_color)
-nx.draw_networkx_labels(network, pos, font_size=font_size, font_color="red")
+pos: dict = hybrid_layout(network, scale=scale, k=scale * 1.0)
+
+# Network annotation =========================================================
+font_size = 8
+nx.draw_networkx_nodes(
+    network, pos, nodelist=buses["id"], node_color=bus_colors, node_shape="s"
+)
+nx.draw_networkx_nodes(
+    network, pos, nodelist=offers["id"], node_color=offer_colors, node_shape="o"
+)
 nx.draw_networkx_labels(
     network,
-    offset(pos, 0, -0.2 * scale),
+    pos,
+    labels={id: id for id in buses["id"]},
+    font_size=font_size,
+    font_color="red",
+)
+nx.draw_networkx_labels(
+    network,
+    pos,
+    labels={id: id for id in offers["id"]},
+    font_size=font_size,
+    font_color="black",
+)
+nx.draw_networkx_labels(
+    network,
+    {id: xy + [0, -0.2 * scale] for id, xy in pos.items()},
     labels=node_labels,
     font_size=font_size,
 )
 nx.draw_networkx_edges(
     network,
     pos,
-    edge_color=edge_color,
+    edge_color=edge_utilization,
     edge_cmap=cm.coolwarm,
     edge_vmin=0.0,
     edge_vmax=1.0,
 )
-
 nx.draw_networkx_edge_labels(
     network,
     pos,
-    edge_labels=flow_labels | supply_labels,
+    edge_labels=edge_labels,
     font_size=font_size,
+    font_color="blue",
 )
 
+# Display network ============================================================
 plt.axis("off")
 plt.tight_layout()
 plt.savefig("network.png", dpi=300)
