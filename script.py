@@ -1,61 +1,83 @@
-import copy
 import math
+from typing import TypeAlias
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+import polars as pl
 import pyomo.environ as pyo
 from pyomo.core import Model
 from pyomo.core.expr.relational_expr import EqualityExpression
-from polars import DataFrame, Series, col
 
-# Base power
-base_power = 1000
+Id: TypeAlias = pl.String
+MW: TypeAlias = pl.Float64
+MWPerRad: TypeAlias = pl.Float64
+USDPerMWh: TypeAlias = pl.Float64
 
-# Network data
-buses = DataFrame(
+# Network data ===============================================================
+# load in MW
+buses = pl.DataFrame(
     [
-        {"id": "B1", "load": 0},
-        {"id": "B2", "load": 0},
-        {"id": "B3", "load": 150},
-    ]
+        {"id": "B1", "load": 0.0},
+        {"id": "B2", "load": 0.0},
+        {"id": "B3", "load": 150.0},
+    ],
+    schema={"id": Id, "load": MW},
 )
-generators = DataFrame(
+generators = pl.DataFrame(
     [  # excludes "capacity", "cost"
         {"id": "G1", "node_id": "B1"},
         {"id": "G2", "node_id": "B2"},
         {"id": "G3", "node_id": "B1"},
-    ]
+    ],
+    schema={"id": Id, "node_id": Id},
 )
-lines = DataFrame(
+
+# capacity in MW
+# susceptance in MW/rad
+lines = pl.DataFrame(
     # fmt: off
     [
-        {"from_node_id": "B1", "to_node_id": "B2", "susceptance": 0.25, "capacity": 30.},
-        {"from_node_id": "B1", "to_node_id": "B3", "susceptance": 0.25, "capacity": 100.},
-        {"from_node_id": "B2", "to_node_id": "B3", "susceptance": 0.25, "capacity": 100.},
-    ]
+        {"from_node_id": "B1", "to_node_id": "B2", "susceptance": 1000, "capacity": 30.0},
+        {"from_node_id": "B1", "to_node_id": "B3", "susceptance": 1000, "capacity": 100.0},
+        {"from_node_id": "B2", "to_node_id": "B3", "susceptance": 1000, "capacity": 100.0},
+    ],
+    schema={"from_node_id": Id, "to_node_id": Id, "susceptance": MWPerRad, "capacity": MW},
     # fmt: on
 )
-offers = DataFrame(
+# price in $/MWh
+# max_quantity in MW
+offers = pl.DataFrame(
     [
         {"id": "G1a", "generator_id": "G1", "max_quantity": 200.0, "price": 10.00},
         {"id": "G2a", "generator_id": "G2", "max_quantity": 200.0, "price": 12.00},
         {"id": "G3a", "generator_id": "G3", "max_quantity": 200.0, "price": 14.00},
-        # {"id": "G1b", "generator_id": "G1", "max_quantity": 100.0, "price": 20.00},
-        # {"id": "G2b", "generator_id": "G2", "max_quantity": 100.0, "price": 22.00},
-        # {"id": "G3b", "generator_id": "G3", "max_quantity": 100.0, "price": 24.00},
-    ]
+        {"id": "G1b", "generator_id": "G1", "max_quantity": 100.0, "price": 20.00},
+        {"id": "G2b", "generator_id": "G2", "max_quantity": 100.0, "price": 22.00},
+        {"id": "G3b", "generator_id": "G3", "max_quantity": 100.0, "price": 24.00},
+    ],
+    schema={"id": Id, "generator_id": Id, "max_quantity": MW, "price": USDPerMWh},
 ).sort(by=["generator_id", "price"])
 
-# Index sets
+# Index sets =================================================================
 Buses = range(buses.height)
 Lines = range(lines.height)
 Offers = range(offers.height)
 Generators = range(generators.height)
 
+# Model parameters ===========================================================
 model = pyo.ConcreteModel()
 
 
+model.loads = pyo.Param(
+    Buses, initialize={b: buses[b, "load"] for b in Buses}, mutable=True
+)
+model.susceptances = pyo.Param(
+    Lines, initialize={ell: lines[ell, "susceptance"] for ell in Lines}
+)
+
+
+# Model variables ============================================================
 def supply_bounds(model: Model, o: int) -> tuple[float, float]:
     return (0.0, offers[o, "max_quantity"])
 
@@ -65,25 +87,18 @@ def flow_bounds(model: Model, ell: int) -> tuple[float, float]:
     return (-capacity, +capacity)
 
 
-# Parameters
-model.loads = pyo.Param(
-    Buses, initialize={b: buses[b, "load"] for b in Buses}, mutable=True
-)
-model.susceptances = pyo.Param(
-    Lines, initialize={ell: lines[ell, "susceptance"] for ell in Lines}
-)
-
-# Variables
 model.p = pyo.Var(Offers, bounds=supply_bounds)
 model.f = pyo.Var(Lines, bounds=flow_bounds)
 model.theta = pyo.Var(Buses, bounds=(-math.pi, +math.pi))
 model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
-# Objective
+# Model objective function ===================================================
 model.total_cost = pyo.Objective(
     expr=sum(offers[o, "price"] * model.p[o] for o in Offers),
     sense=pyo.minimize,
 )
+
+# Model constraints ==========================================================
 
 
 def network_incidence(b: int, ell: int) -> int:
@@ -114,7 +129,7 @@ def balance_rule(model: Model, b: int) -> EqualityExpression:
 def flow_rule(model: Model, ell: int) -> EqualityExpression:
     return (
         sum(
-            base_power * sign * model.susceptances[b] * model.theta[b]
+            sign * model.susceptances[b] * model.theta[b]
             for b in Buses
             if (sign := network_incidence(b, ell))
         )
@@ -126,32 +141,38 @@ model.balance = pyo.Constraint(Buses, rule=balance_rule)
 model.flow = pyo.Constraint(Lines, rule=flow_rule)
 model.reference_angle = pyo.Constraint(expr=model.theta[0] == 0.0)
 
+# Optimization ===============================================================
 solver = pyo.SolverFactory("highs")
 results = solver.solve(model, tee=True)  # tee output to console
+assert results.solver.termination_condition is pyo.TerminationCondition.optimal
 print(results)
 
+# Transfer solution to tables ================================================
 supply = [pyo.value(model.p[o]) for o in Offers]
 flow = [pyo.value(model.f[ell]) for ell in Lines]
 angles_deg = [pyo.value(model.theta[b]) * 180 / math.pi for b in Buses]
 marginal_prices = [model.dual[model.balance[b]] for b in Buses]
 
-offers = offers.with_columns([Series("supply", supply)])
-lines = lines.with_columns([Series("flow", flow)])
+offers = offers.with_columns([pl.Series("supply", supply)])
+lines = lines.with_columns([pl.Series("flow", flow)])
 buses = buses.with_columns(
-    [Series("theta_deg", angles_deg), Series("price", marginal_prices)]
+    [pl.Series("angle_deg", angles_deg), pl.Series("price", marginal_prices)]
 )
 
-supply_prices = offers.group_by("generator_id").agg(col("price"))
-supply_totals = offers.group_by("generator_id").agg(col("supply").sum())
-generators = generators.join(
-    supply_totals, left_on="id", right_on="generator_id", how="left"
-)
-generators = generators.join(
-    supply_prices, left_on="id", right_on="generator_id", how="left"
-)
+# Added aggregated offer data into generators table
+for column in [
+    offers.group_by("generator_id").agg(pl.col("price").alias("prices_list")),
+    offers.group_by("generator_id").agg(pl.col("supply").sum()),
+    offers.group_by("generator_id").agg(pl.col("max_quantity").sum()),
+]:
+    generators = generators.join(
+        column, left_on="id", right_on="generator_id", how="left"
+    )
+
+# Form price label string from list of offer prices
 generators = generators.with_columns(
-    col("price")
-    .map_elements(lambda x: ", ".join(map("{:.2f}".format, sorted(x))))
+    pl.col("prices_list")
+    .map_elements(lambda x: "/".join(map("{:.2f}".format, sorted(x))))
     .alias("prices")
 )
 
@@ -161,17 +182,35 @@ print("buses -", buses)
 print("generators -", generators)
 
 
-def marginal_price_estimate(model, b, delta_load=1.0):
-    model_perturbed = copy.deepcopy(model)
-    model_perturbed.loads[b] += delta_load
-    solver.solve(model_perturbed, tee=True)
+# Evaluate marginal prices ===================================================
+
+
+def marginal_price_estimate(model, b: int, delta_load: float = 1.0) -> float:
+
+    # Restore nominal state before perturbation
+    # (copy.deepcopy of pyomo models is not officially supported)
+    results = solver.solve(model, tee=False)
+    assert results.solver.termination_condition is pyo.TerminationCondition.optimal
     f_model = pyo.value(model.total_cost)
-    f_perturbed = pyo.value(model_perturbed.total_cost)
+    load_original = model.loads[b]
+
+    # Perturb model with unit increment load at bus b
+    model.loads[b] += delta_load
+    results = solver.solve(model, tee=True)
+    assert results.solver.termination_condition is pyo.TerminationCondition.optimal
+    f_perturbed = pyo.value(model.total_cost)
+
+    # Restore model state
+    model.loads[b] = load_original
+
+    # Difference approximation of marginal cost
     return (f_perturbed - f_model) / delta_load
 
 
 marginal_price_estimates = [marginal_price_estimate(model, b) for b in Buses]
 print(f"marginal_price_estimates = {marginal_price_estimates}")
+
+# Helper functions for plotting ==============================================
 
 
 def mapvalues(f, keys, *values) -> dict:
@@ -183,6 +222,7 @@ def offset(positions: dict, dx: float, dy: float) -> dict:
     return {id: xy + dxy for id, xy in positions.items()}
 
 
+# Network definition for plotting =============================================
 network = nx.DiGraph()
 
 network.add_nodes_from(buses["id"])
@@ -197,9 +237,11 @@ network.add_edges_from(zip(generators["id"], generators["node_id"]))
 # connection_color = tags(generators["id"], "gray")
 # edge_color = line_color + connection_color
 
-nodal_price_labels = mapvalues("${:.2f}/MWh".format, buses["id"], buses["price"])
-offer_price_labels = mapvalues(
-    "${:}/MWh".format, generators["id"], generators["prices"]
+nodal_price_labels = mapvalues(
+    "{}MW\n@ ${:.2f}/MWh".format, buses["id"], buses["load"], buses["price"]
+)
+offer_prices_labels = mapvalues(
+    "$({:})/MWh".format, generators["id"], generators["prices"]
 )
 flow_labels = mapvalues(
     "{:.0f}MW/{:.0f}MW".format,
@@ -208,9 +250,10 @@ flow_labels = mapvalues(
     lines["capacity"],
 )
 supply_labels = mapvalues(
-    "{:.0f}MW".format,
+    "{:.0f}MW/{:.0f}MW".format,
     zip(generators["id"], generators["node_id"]),
     generators["supply"],
+    generators["max_quantity"],
 )
 line_utilization = lines["flow"].abs() / lines["capacity"]
 connection_utilization = [0.0 for _ in generators["id"]]
@@ -230,13 +273,17 @@ nx.draw_networkx(network, pos, **options)
 nx.draw_networkx_labels(
     network,
     offset(pos, 0, -0.1),
-    labels=nodal_price_labels | offer_price_labels,
-    font_size=9,
+    labels=nodal_price_labels | offer_prices_labels,
+    font_size=6,
 )
 nx.draw_networkx_edge_labels(
-    network, pos, edge_labels=flow_labels | supply_labels, font_size=8
+    network,
+    pos,
+    edge_labels=flow_labels | supply_labels,
+    font_size=6,
 )
 
 plt.axis("off")
 plt.tight_layout()
+plt.savefig("network.png", dpi=300)
 plt.show()
