@@ -168,13 +168,10 @@ angles_deg = [pyo.value(model.theta[b]) * 180 / math.pi for b in Buses]
 marginal_prices = [model.dual[model.balance[b]] for b in Buses]
 
 # Extend data tables with decision variables
-offers = offers.with_columns([pl.Series("supply", supply)])
-lines = lines.with_columns([pl.Series("flow", flow)])
+offers = offers.with_columns(supply=pl.Series(supply))
+lines = lines.with_columns(flow=pl.Series(flow))
 buses = buses.with_columns(
-    [
-        pl.Series("angle_deg", angles_deg),
-        pl.Series("price", marginal_prices),
-    ]
+    angle_deg=pl.Series(angles_deg), price=pl.Series(marginal_prices)
 )
 
 # Extend data tables with post-processed quantities
@@ -219,17 +216,27 @@ def mapvalues(f, keys, *values) -> dict:
 
 
 def hybrid_layout(
-    G: nx.Graph, scale: float = 1.0, k: float = 0.4, seed: int = 0
+    G: nx.Graph,
+    hub_scale: float = 1.0,
+    satellite_scale: float = 1.0,
+    k: float = 0.4,
+    seed: int = 0,
 ) -> dict:
     """Produces a better outcome than either pure layout provided by networkx"""
     hubs = [n for n in G.nodes if G.degree(n) > 1]
-    pos = nx.kamada_kawai_layout(G.subgraph(hubs), scale=scale)
+    pos = nx.kamada_kawai_layout(G.subgraph(hubs), scale=hub_scale)
     for hub in hubs:
         satellites = {
-            *network.successors(hub),
-            *network.predecessors(hub),
+            *G.successors(hub),
+            *G.predecessors(hub),
         }.difference(hubs)
-        pos.update(nx.circular_layout(G.subgraph(satellites), center=pos[hub]))
+        pos.update(
+            nx.circular_layout(
+                G.subgraph(satellites),
+                center=pos[hub],
+                scale=satellite_scale,
+            )
+        )
         print(f"{hub} => {satellites}")
     assert len(pos) == G.number_of_nodes()
     return nx.spring_layout(G, pos=pos, fixed=hubs, seed=seed, k=k)
@@ -262,13 +269,13 @@ node_labels = bus_price_labels | offer_price_labels
 
 # Edge defnition =============================================================
 flow_labels = mapvalues(
-    "{:.0f}MW/{:.0f}MW".format,
+    "{:.0f}MW/\n{:.0f}MW".format,
     zip(lines["from_bus_id"], lines["to_bus_id"]),
     lines["flow"],
     lines["capacity"],
 )
 supply_labels = mapvalues(
-    "{:.0f}MW/{:.0f}MW".format,
+    "{:.0f}MW/\n{:.0f}MW".format,
     zip(offers["id"], offers["node_id"]),
     offers["supply"],
     offers["max_quantity"],
@@ -279,8 +286,10 @@ edge_utilization = [*lines["utilization"], *offers["utilization"]]
 edge_labels = flow_labels | supply_labels
 
 # Network layout =============================================================
-scale = 20.0
-pos: dict = hybrid_layout(network, scale=scale, k=scale * 1.0)
+scale = 50.0
+pos: dict = hybrid_layout(
+    network, hub_scale=scale, satellite_scale=scale, k=scale * 1.0
+)
 
 # Network annotation =========================================================
 font_size = 8
@@ -306,7 +315,7 @@ nx.draw_networkx_labels(
 )
 nx.draw_networkx_labels(
     network,
-    {id: xy + [0, -0.2 * scale] for id, xy in pos.items()},
+    {id: xy + [0, -0.3 * scale] for id, xy in pos.items()},
     labels=node_labels,
     font_size=font_size,
 )
