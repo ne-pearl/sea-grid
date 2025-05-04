@@ -428,20 +428,26 @@ print("path_edges -", path_edges)
 congested_path_edges = path_edges.filter(pl.col("is_congested"))
 print("congested path_edges -", congested_path_edges)
 
-congestion_summary = congested_path_edges.group_by(
-    ["from_node_id", "to_node_id", "target"]
-).agg(pl.all()).sort(["target"])
+input_nodes = set(offers[:, "node_id"])
+
+path_summary = paths.group_by(["target"]).agg(pl.all()).sort(["target"])
+congestion_summary = (
+    congested_path_edges.group_by(["from_node_id", "to_node_id", "target"])
+    .agg(pl.all())
+    .sort(["target"])
+)
+
+print("path_summary -", path_summary)
 print("congestion_summary -", congestion_summary)
+
 print("Constraints implied by congestion:")
 for target, coeffs, sources in congestion_summary.select(
     "target", "relative_susceptance", "source"
 ).iter_rows():
-    terms = [f"{c:.2f}*P[{s}]" for c, s in zip(coeffs, sources)]
+    terms = [f"{c:.2f}*PTotal[{s}]" for c, s in zip(coeffs, sources) if s in input_nodes]
     print(f"@ {target}: {' + '.join(terms)} == 0")
 
-path_summary = paths.group_by(["target"]).agg(pl.all()).sort(["target"])
-print("path_summary -", path_summary)
 print("Constraints implied unit increment:")
 for target, sources in path_summary.select("target", "source").iter_rows():
-    terms = [f"P[{s}]" for s in set(sources)]
+    terms = [f"PTotal[{s}]" for s in set(sources) if s in input_nodes]
     print(f"@ {target}: {' + '.join(terms)} == 1")
