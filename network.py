@@ -174,13 +174,13 @@ def optimize(model, **kwargs) -> float:
 optimize(model, tee=True)  # tee output to console
 
 # Transfer solution to tables ================================================
-supply = [pyo.value(model.p[o]) for o in Offers]
+quantity = [pyo.value(model.p[o]) for o in Offers]
 flow = [pyo.value(model.f[ell]) for ell in Lines]
 angles_deg = [pyo.value(model.theta[b]) * 180 / math.pi for b in Buses]
 marginal_prices = [model.dual[model.balance[b]] for b in Buses]
 
 # Extend data tables with decision variables
-offers = offers.with_columns(supply=pl.Series(supply))
+offers = offers.with_columns(quantity=pl.Series(quantity))
 lines = lines.with_columns(flow=pl.Series(flow))
 buses = buses.with_columns(
     angle_deg=pl.Series(angles_deg), price=pl.Series(marginal_prices)
@@ -194,7 +194,7 @@ offers = offers.join(  # node_id for each offer
     generators[:, ("id", "node_id")], left_on="generator_id", right_on="id", how="left"
 )
 offers = offers.with_columns(  # utilization of each offer
-    (pl.col("supply") / pl.col("max_quantity")).alias("utilization")
+    (pl.col("quantity") / pl.col("max_quantity")).alias("utilization")
 )
 
 print("offers -", offers)
@@ -289,7 +289,7 @@ flow_labels = mapvalues(
 supply_labels = mapvalues(
     "{:.0f}MW/\n{:.0f}MW".format,
     zip(offers["id"], offers["node_id"]),
-    offers["supply"],
+    offers["quantity"],
     offers["max_quantity"],
 )
 network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
@@ -348,10 +348,9 @@ nx.draw_networkx_edge_labels(
 )
 
 # Display network ============================================================
-# plt.axis("off")
-# plt.tight_layout()
-# plt.savefig("network.png", dpi=300)
-# plt.show(block=False)
+plt.axis("off")
+plt.savefig("network.png", dpi=300)
+plt.show(block=False)
 
 # Path analysis ==============================================================
 

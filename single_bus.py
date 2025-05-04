@@ -85,9 +85,10 @@ generators = (
 print("generators -", generators)
 
 
-def cumsum_mid(x):
-    y = np.concatenate(([0], np.cumsum(x)))
-    return (y[:-1] + y[1:]) * 0.5
+def cumsum_mid(x, start=0):
+    """Interval midpoints from widths."""
+    accumulated = np.concatenate(([start], np.cumsum(x)))
+    return (accumulated[:-1] + accumulated[1:]) * 0.5
 
 
 # Plot dispatch and price
@@ -100,7 +101,7 @@ bars = ax.bar(
     height=sorted_offers["price"],
     width=sorted_offers["max_quantity"],
     color=colors,
-    alpha=0.1,
+    alpha=0.4,
 )
 select = sorted_offers["quantity"] > 0
 dispatched_offers = sorted_offers.filter(select)
@@ -109,7 +110,7 @@ ax.bar(
     height=dispatched_offers["price"],
     width=dispatched_offers["quantity"],
     color=colors[select],
-    alpha=0.5,
+    alpha=0.8,
 )
 ax.axvline(x=load, color="black", label="load")
 ax.axhline(y=marginal_price, color="red", label="marginal price")
@@ -137,4 +138,6 @@ ax.bar_label(
 )
 ax.set_xlabel("Quantity (MW)")
 ax.set_ylabel("Price ($/MWh)")
-plt.show()
+ax.set_title("Offer stack to marginal stack")
+plt.savefig("single_bus.png", dpi=300)
+plt.show(block=False)
