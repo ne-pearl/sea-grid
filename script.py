@@ -1,6 +1,6 @@
-import itertools
 import math
 from typing import TypeAlias
+import IPython
 import matplotlib.cm as cm
 import matplotlib.colors as mc
 import matplotlib.pyplot as plt
@@ -10,6 +10,10 @@ import polars as pl
 import pyomo.environ as pyo
 from pyomo.core import Model
 from pyomo.core.expr.relational_expr import EqualityExpression
+
+# Prevent truncation of tall tables ==========================================
+IPython.core.interactiveshell.InteractiveShell.ast_node_interactivity = "all"
+pl.Config.set_tbl_rows(-1)  # "unlimited rows"
 
 # Units of measure ===========================================================
 Id: TypeAlias = pl.String
@@ -45,6 +49,14 @@ lines = pl.DataFrame(
     schema={"from_bus_id": Id, "to_bus_id": Id, "susceptance": MWPerRad, "capacity": MW},
     # fmt: on
 )
+
+# Ensure edge pairs are consistely ordered to simplify look-ups
+pairs = list(zip(lines[:, "from_bus_id"], lines[:, "to_bus_id"]))
+lines = lines.with_columns(
+    from_bus_id=pl.Series(min(p) for p in pairs),
+    to_bus_id=pl.Series(max(p) for p in pairs),
+)
+
 offers = pl.DataFrame(
     [
         {"generator_id": "G1", "max_quantity": 200.0, "price": 10.00},
@@ -336,7 +348,100 @@ nx.draw_networkx_edge_labels(
 )
 
 # Display network ============================================================
-plt.axis("off")
-plt.tight_layout()
-plt.savefig("network.png", dpi=300)
-plt.show(block=True)
+# plt.axis("off")
+# plt.tight_layout()
+# plt.savefig("network.png", dpi=300)
+# plt.show(block=False)
+
+# Path analysis ==============================================================
+
+path_rows: list[dict] = []
+path_edge_rows: list[dict] = []
+undirected_network = network.to_undirected()
+
+for source in buses[:, "id"]:
+    for target in buses[:, "id"]:
+        if source == target:
+            continue
+        node_sequences = nx.all_simple_paths(
+            undirected_network, source=source, target=target
+        )
+        edge_sequences = list(map(nx.utils.pairwise, node_sequences))
+        for path_count, sequence in enumerate(edge_sequences, start=1):
+            path_id = f"{source}-{target}/{path_count}"
+            edge_rows: list[dict] = []
+            path_resistance = 0.0
+            for from_node_id, to_node_id in sequence:
+                orientation = 1 if from_node_id < to_node_id else -1
+                if orientation == -1:
+                    from_node_id, to_node_id = to_node_id, from_node_id
+                susceptance, utilization = (
+                    lines.filter(
+                        (pl.col("from_bus_id") == from_node_id)
+                        & (pl.col("to_bus_id") == to_node_id)
+                    )
+                    .select(["susceptance", "utilization"])
+                    .row(0)
+                )
+                path_resistance += 1 / susceptance
+                path_edge_rows.append(
+                    dict(
+                        from_node_id=from_node_id,
+                        to_node_id=to_node_id,
+                        orientation=orientation,
+                        is_congested=0.99 < utilization,
+                        path_id=path_id,
+                        # source=source,
+                        # target=target,
+                    )
+                )
+            path_rows.append(
+                dict(
+                    path_id=path_id,
+                    source=source,
+                    target=target,
+                    susceptance=1 / path_resistance,
+                )
+            )
+            # for row in edge_rows:
+            #     row["path_susceptance"] = 1 / path_resistance
+            # path_edge_rows.extend(edge_rows)
+
+paths = pl.DataFrame(path_rows)
+path_edges = pl.DataFrame(path_edge_rows)
+
+group_keys = ["source", "target"]
+grouped = paths.group_by(group_keys).agg(
+    pl.col("susceptance").sum().alias("total_susceptance")
+)
+paths = paths.join(grouped, on=group_keys).with_columns(
+    (pl.col("susceptance") / pl.col("total_susceptance")).alias("relative_susceptance")
+)
+
+path_edges = path_edges.join(
+    paths[:, ("path_id", "source", "target", "relative_susceptance")], on=["path_id"]
+)
+
+print("paths -", paths)
+print("path_edges -", path_edges)
+
+congested_path_edges = path_edges.filter(pl.col("is_congested"))
+print("congested path_edges -", congested_path_edges)
+
+congestion_summary = congested_path_edges.group_by(
+    ["from_node_id", "to_node_id", "target"]
+).agg(pl.all()).sort(["target"])
+print("congestion_summary -", congestion_summary)
+print("Constraints implied by congestion:")
+for target, coeffs, sources in congestion_summary.select(
+    "target", "relative_susceptance", "source"
+).iter_rows():
+    terms = [f"{c:.2f}*P[{s}]" for c, s in zip(coeffs, sources)]
+    print(f"@ {target}: {' + '.join(terms)} == 0")
+
+path_summary = paths.group_by(["target"]).agg(pl.all()).sort(["target"])
+print("path_summary -", path_summary)
+print("Constraints implied unit increment:")
+for target, sources in path_summary.select("target", "source").iter_rows():
+    terms = [f"P[{s}]" for s in set(sources)]
+    print(f"@ {target}: {' + '.join(terms)} == 1")
