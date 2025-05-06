@@ -8,3 +8,10 @@ polars
 pyomo
 scipy
 
+pypsa
+matplotlib
+cartopy
+highspy
+
+PYPOWER
+pandapower
