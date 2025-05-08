@@ -8,10 +8,14 @@ polars
 pyomo
 scipy
 
+jupyter-console
+
 pypsa
 matplotlib
 cartopy
 highspy
 
 PYPOWER
+
 pandapower
+matpowercaseframes
