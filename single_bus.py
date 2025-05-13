@@ -16,15 +16,13 @@ USDPerMWh: TypeAlias = pl.Float64
 # Network data ===============================================================
 load = 250.0  # MW
 offers = pl.DataFrame(
-    [
-        {"generator_id": "G1", "max_quantity": 100.0, "price": 10.00},
-        {"generator_id": "G2", "max_quantity": 100.0, "price": 11.00},
-        {"generator_id": "G1", "max_quantity": 100.0, "price": 12.00},
-        {"generator_id": "G2", "max_quantity": 100.0, "price": 13.00},
-    ],
-    schema={"id": Id, "generator_id": Id, "max_quantity": MW, "price": USDPerMWh},
+    {
+        "generator_id": ["G1", "G2", "G1", "G2"],
+        "max_quantity": [100.0, 100.0, 100.0, 100.0],
+        "price": [10.00, 11.00, 12.00, 13.00],
+    },
+    schema={"generator_id": Id, "max_quantity": MW, "price": USDPerMWh},
 ).sort(by=["generator_id", "price"])
-
 
 # Unique identifier for each offer
 for column in [
@@ -43,9 +41,10 @@ def supply_bounds(model: Model, o: int) -> tuple[float, float]:
 
 
 model = pyo.ConcreteModel()
+model.load_ = pyo.Param(initialize=load, mutable=True, within=pyo.Reals)  # "model.load" is reserved
 model.p = pyo.Var(Offers, bounds=supply_bounds)
 model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
-model.balance = pyo.Constraint(expr=sum(model.p[o] for o in Offers) == load)
+model.balance = pyo.Constraint(expr=sum(model.p[o] for o in Offers) == model.load_)
 model.total_cost = pyo.Objective(
     expr=sum(offers[o, "price"] * model.p[o] for o in Offers),
     sense=pyo.minimize,
@@ -84,6 +83,15 @@ generators = (
 )
 print("generators -", generators)
 
+# =================================================================================
+
+cost_unperturbed = optimize(model)
+model.load_[None] += 1.0
+cost_perturbed = optimize(model)
+marginal_price_estimate = (cost_perturbed - cost_unperturbed) / 1.0
+assert abs(marginal_price_estimate - marginal_price) < 1e-6
+
+# =================================================================================
 
 def cumsum_mid(x, start=0):
     """Interval midpoints from widths."""
