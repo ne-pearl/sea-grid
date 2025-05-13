@@ -8,6 +8,7 @@ polars
 pyomo
 scipy
 
+jupytext
 jupyter-console
 
 pypsa
