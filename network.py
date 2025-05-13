@@ -11,43 +11,45 @@ import pyomo.environ as pyo
 from pyomo.core import Model
 from pyomo.core.expr.relational_expr import EqualityExpression
 
-# Prevent truncation of tall tables ==========================================
+# Prevent truncation of tall tables
 IPython.core.interactiveshell.InteractiveShell.ast_node_interactivity = "all"
 pl.Config.set_tbl_rows(-1)  # "unlimited rows"
 
-# Units of measure ===========================================================
+# Units of measure
 Id: TypeAlias = pl.String
 MW: TypeAlias = pl.Float64
 MWPerRad: TypeAlias = pl.Float64
 USDPerMWh: TypeAlias = pl.Float64
 
-# Network data ===============================================================
+# Network data
 buses = pl.DataFrame(
-    [
-        {"id": "B1", "load": 0.0},
-        {"id": "B2", "load": 0.0},
-        {"id": "B3", "load": 150.0},
-    ],
+    {
+        "id": ["B1", "B2", "B3"],
+        "load": [0.0, 0.0, 150.0],
+    },
     schema={"id": Id, "load": MW},
 )
-generators = pl.DataFrame(
-    [  # excludes "capacity", "cost"!
-        {"id": "G1", "node_id": "B1"},
-        {"id": "G2", "node_id": "B2"},
-        {"id": "G3", "node_id": "B1"},
-    ],
-    schema={"id": Id, "node_id": Id},
+generators = pl.DataFrame(  # excludes "capacity", "cost"!
+    {
+        "id": ["G1", "G2", "G3"],
+        "bus_id": ["B1", "B2", "B1"],
+    },
+    schema={"id": Id, "bus_id": Id},
 )
 
 lines = pl.DataFrame(
-    # fmt: off
-    [
-        {"from_bus_id": "B1", "to_bus_id": "B2", "susceptance": 1000, "capacity": 30.0},
-        {"from_bus_id": "B1", "to_bus_id": "B3", "susceptance": 1000, "capacity": 100.0},
-        {"from_bus_id": "B2", "to_bus_id": "B3", "susceptance": 1000, "capacity": 100.0},
-    ],
-    schema={"from_bus_id": Id, "to_bus_id": Id, "susceptance": MWPerRad, "capacity": MW},
-    # fmt: on
+    {
+        "from_bus_id": ["B1", "B1", "B2"],
+        "to_bus_id": ["B2", "B3", "B3"],
+        "susceptance": [1000, 1000, 1000],
+        "capacity": [30.0, 100.0, 100.0],
+    },
+    schema={
+        "from_bus_id": Id,
+        "to_bus_id": Id,
+        "susceptance": MWPerRad,
+        "capacity": MW,
+    },
 )
 
 # Ensure edge pairs are consistely ordered to simplify look-ups
@@ -58,18 +60,12 @@ lines = lines.with_columns(
 )
 
 offers = pl.DataFrame(
-    [
-        {"generator_id": "G1", "max_quantity": 200.0, "price": 10.00},
-        {"generator_id": "G2", "max_quantity": 200.0, "price": 12.00},
-        {"generator_id": "G3", "max_quantity": 200.0, "price": 14.00},
-        {"generator_id": "G1", "max_quantity": 100.0, "price": 20.00},
-        {"generator_id": "G2", "max_quantity": 100.0, "price": 22.00},
-        {"generator_id": "G3", "max_quantity": 100.0, "price": 24.00},
-        {"generator_id": "G1", "max_quantity": 200.0, "price": 15.00},
-        {"generator_id": "G2", "max_quantity": 200.0, "price": 16.00},
-        {"generator_id": "G3", "max_quantity": 200.0, "price": 17.00},
-    ],
-    schema={"id": Id, "generator_id": Id, "max_quantity": MW, "price": USDPerMWh},
+    {
+        "generator_id": ["G1", "G2", "G3", "G1", "G2", "G3", "G1", "G2", "G3"],
+        "max_quantity": [200.0, 200.0, 200.0, 100.0, 100.0, 100.0, 200.0, 200.0, 200.0],
+        "price": [10.00, 12.00, 14.00, 20.00, 22.00, 24.00, 15.00, 16.00, 17.00],
+    },
+    schema={"generator_id": Id, "max_quantity": MW, "price": USDPerMWh},
 ).sort(by=["generator_id", "price"])
 
 # Unique identifier for each offer
@@ -79,13 +75,13 @@ for column in [
 ]:
     offers = offers.with_columns(column)
 
-# Index sets =================================================================
+# Index sets
 Buses = range(buses.height)
 Lines = range(lines.height)
 Offers = range(offers.height)
 Generators = range(generators.height)
 
-# Model parameters ===========================================================
+# Model parameters
 model = pyo.ConcreteModel()
 model.loads = pyo.Param(
     Buses, initialize={b: buses[b, "load"] for b in Buses}, mutable=True
@@ -95,7 +91,7 @@ model.susceptances = pyo.Param(
 )
 
 
-# Model decision variables ===================================================
+# Model decision variables
 def supply_bounds(model: Model, o: int) -> tuple[float, float]:
     return (0.0, offers[o, "max_quantity"])
 
@@ -110,13 +106,13 @@ model.f = pyo.Var(Lines, bounds=flow_bounds)
 model.theta = pyo.Var(Buses, bounds=(-math.pi, +math.pi))
 model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
-# Model objective function ===================================================
+# Model objective function
 model.total_cost = pyo.Objective(
     expr=sum(offers[o, "price"] * model.p[o] for o in Offers),
     sense=pyo.minimize,
 )
 
-# Model constraints ==========================================================
+# Model constraints
 
 
 def network_incidence(b: int, ell: int) -> int:
@@ -129,7 +125,7 @@ def network_incidence(b: int, ell: int) -> int:
 
 
 def supply_incidence(b: int, g: int, o: int) -> bool:
-    node_generator: bool = buses[b, "id"] == generators[g, "node_id"]
+    node_generator: bool = buses[b, "id"] == generators[g, "bus_id"]
     generator_offer: bool = generators[g, "id"] == offers[o, "generator_id"]
     return node_generator and generator_offer
 
@@ -162,7 +158,7 @@ model.flow = pyo.Constraint(Lines, rule=flow_rule)
 model.reference_angle = pyo.Constraint(expr=model.theta[0] == 0.0)
 
 
-# Optimization ===============================================================
+# Optimization
 def optimize(model, **kwargs) -> float:
     """Solve the optimization problem encoded in model and return the objective value."""
     solver = pyo.SolverFactory("highs")
@@ -173,7 +169,7 @@ def optimize(model, **kwargs) -> float:
 
 optimize(model, tee=True)  # tee output to console
 
-# Transfer solution to tables ================================================
+# Transfer solution to tables
 quantity = [pyo.value(model.p[o]) for o in Offers]
 flow = [pyo.value(model.f[ell]) for ell in Lines]
 angles_deg = [pyo.value(model.theta[b]) * 180 / math.pi for b in Buses]
@@ -190,8 +186,8 @@ buses = buses.with_columns(
 lines = lines.with_columns(  # utilization of each line
     (pl.col("flow").abs() / pl.col("capacity")).alias("utilization")
 )
-offers = offers.join(  # node_id for each offer
-    generators[:, ("id", "node_id")], left_on="generator_id", right_on="id", how="left"
+offers = offers.join(  # bus_id for each offer
+    generators[:, ("id", "bus_id")], left_on="generator_id", right_on="id", how="left"
 )
 offers = offers.with_columns(  # utilization of each offer
     (pl.col("quantity") / pl.col("max_quantity")).alias("utilization")
@@ -202,7 +198,7 @@ print("lines -", lines)
 print("buses -", buses)
 print("generators -", generators)
 
-# Evaluate marginal prices ===================================================
+# Evaluate marginal prices
 
 
 def marginal_price_estimate(model, b: int, delta_load: float = 1.0) -> float:
@@ -220,7 +216,7 @@ marginal_price_estimates = [marginal_price_estimate(model, b) for b in Buses]
 print(f"marginal_price_estimates = {marginal_price_estimates}")
 assert marginal_price_estimates == marginal_prices
 
-# Helper functions for plotting ==============================================
+# Helper functions for plotting
 
 
 def mapvalues(f, keys, *values) -> dict:
@@ -254,10 +250,10 @@ def hybrid_layout(
     return nx.spring_layout(G, pos=pos, fixed=hubs, seed=seed, k=k)
 
 
-# Network definition for plotting =============================================
+# Network definition for plotting
 network = nx.DiGraph()
 
-# Node defnition ==============================================================
+# Node defnition
 bus_price_labels = mapvalues(
     "{:}MW\n@ ${:.2f}/MWh".format, buses["id"], buses["load"], buses["price"]
 )
@@ -279,7 +275,7 @@ network.add_nodes_from(buses["id"])
 network.add_nodes_from(offers["id"])
 node_labels = bus_price_labels | offer_price_labels
 
-# Edge defnition =============================================================
+# Edge defnition
 flow_labels = mapvalues(
     "{:.0f}MW/\n{:.0f}MW".format,
     zip(lines["from_bus_id"], lines["to_bus_id"]),
@@ -288,22 +284,22 @@ flow_labels = mapvalues(
 )
 supply_labels = mapvalues(
     "{:.0f}MW/\n{:.0f}MW".format,
-    zip(offers["id"], offers["node_id"]),
+    zip(offers["id"], offers["bus_id"]),
     offers["quantity"],
     offers["max_quantity"],
 )
 network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
-network.add_edges_from(zip(offers["id"], offers["node_id"]))
+network.add_edges_from(zip(offers["id"], offers["bus_id"]))
 edge_utilization = [*lines["utilization"], *offers["utilization"]]
 edge_labels = flow_labels | supply_labels
 
-# Network layout =============================================================
+# Network layout
 scale = 50.0
 pos: dict = hybrid_layout(
     network, hub_scale=scale, satellite_scale=scale, k=scale * 1.0
 )
 
-# Network annotation =========================================================
+# Network annotation
 font_size = 8
 nx.draw_networkx_nodes(
     network, pos, nodelist=buses["id"], node_color=bus_colors, node_shape="s"
@@ -347,12 +343,12 @@ nx.draw_networkx_edge_labels(
     font_color="blue",
 )
 
-# Display network ============================================================
+# Display network
 plt.axis("off")
 plt.savefig("network.png", dpi=300)
 plt.show(block=False)
 
-# Path analysis ==============================================================
+# Path analysis
 
 path_rows: list[dict] = []
 path_edge_rows: list[dict] = []
@@ -427,7 +423,7 @@ print("path_edges -", path_edges)
 congested_path_edges = path_edges.filter(pl.col("is_congested"))
 print("congested path_edges -", congested_path_edges)
 
-input_nodes = set(offers[:, "node_id"])
+input_nodes = set(offers[:, "bus_id"])
 
 path_summary = paths.group_by(["target"]).agg(pl.all()).sort(["target"])
 congestion_summary = (
@@ -443,7 +439,9 @@ print("Constraints implied by congestion:")
 for target, coeffs, sources in congestion_summary.select(
     "target", "relative_susceptance", "source"
 ).iter_rows():
-    terms = [f"{c:.2f}*PTotal[{s}]" for c, s in zip(coeffs, sources) if s in input_nodes]
+    terms = [
+        f"{c:.2f}*PTotal[{s}]" for c, s in zip(coeffs, sources) if s in input_nodes
+    ]
     print(f"@ {target}: {' + '.join(terms)} == 0")
 
 print("Constraints implied unit increment:")
