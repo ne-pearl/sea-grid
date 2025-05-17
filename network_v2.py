@@ -10,7 +10,7 @@ import polars as pl
 import pyomo.environ as pyo
 from pyomo.core import Model
 from pyomo.core.base.param import ParamData
-from pyomo.core.expr.relational_expr import EqualityExpression
+from pyomo.core.expr.relational_expr import EqualityExpression, InequalityExpression
 
 # Prevent truncation of tall tables
 IPython.core.interactiveshell.InteractiveShell.ast_node_interactivity = "all"
@@ -98,6 +98,7 @@ model.susceptances = pyo.Param(
 model.line_capacities = pyo.Param(
     Lines,
     initialize={ell: lines[ell, "capacity"] for ell in Lines},
+    mutable=True,
     doc="capacity @ line [MW]",
 )
 
@@ -113,7 +114,11 @@ def flow_bounds(model: Model, ell: int) -> tuple[float, float]:
 
 
 model.p = pyo.Var(Offers, bounds=supply_bounds, doc="power injection @ offer [MW]")
-model.f = pyo.Var(Lines, bounds=flow_bounds, doc="power flow @ line [MW]")
+model.f = pyo.Var(
+    Lines,
+    # bounds=flow_bounds,
+    doc="power flow @ line [MW]",
+)
 model.theta = pyo.Var(
     Buses, bounds=(-math.pi, +math.pi), doc="voltage angle @ bus [rad]"
 )
@@ -182,6 +187,22 @@ model.reference_angle = pyo.Constraint(
 )
 
 
+def flow_bound_lower_rule(model: Model, ell: int) -> InequalityExpression:
+    return -model.line_capacities[ell] <= model.f[ell]
+
+
+def flow_bound_upper_rule(model: Model, ell: int) -> InequalityExpression:
+    return model.f[ell] <= model.line_capacities[ell]
+
+
+model.flow_bounds_lower = pyo.Constraint(
+    Lines, rule=flow_bound_lower_rule, doc="flow lower bound @ line"
+)
+model.flow_bounds_upper = pyo.Constraint(
+    Lines, rule=flow_bound_upper_rule, doc="flow upper bound @ line"
+)
+
+
 # Optimization
 def optimize(model, **kwargs) -> float:
     """Solve the optimization problem encoded in model and return the objective value."""
@@ -193,12 +214,17 @@ def optimize(model, **kwargs) -> float:
 
 total_cost = optimize(model, tee=True)  # tee output to console
 
+model.dual.pprint()
+
 # Transfer solution to tables
 quantity = [pyo.value(model.p[o]) for o in Offers]
 flow = [pyo.value(model.f[ell]) for ell in Lines]
 angles_deg = [pyo.value(model.theta[b]) * 180 / math.pi for b in Buses]
 load_marginal_prices = [model.dual[model.balance[b]] for b in Buses]
-flow_marginal_prices = [model.dual[model.flow[ell]] for ell in Lines]
+flow_marginal_prices = np.add(
+    [model.dual[model.flow_bounds_lower[ell]] for ell in Lines],
+    [model.dual[model.flow_bounds_upper[ell]] for ell in Lines],
+)
 
 # Extend data tables with decision variables
 offers = offers.with_columns(quantity=pl.Series(quantity))
@@ -243,10 +269,11 @@ load_marginal_price_estimates = [
     direct_marginal_price(model, model.loads[b]) for b in Buses
 ]
 flow_marginal_price_estimates = [
-    direct_marginal_price(model, model.loads[b]) for b in Buses
+    direct_marginal_price(model, model.line_capacities[ell]) for ell in Lines
 ]
 
 assert np.allclose(load_marginal_price_estimates, load_marginal_prices)
+assert np.allclose(flow_marginal_price_estimates, flow_marginal_prices)
 
 # Helper functions for plotting
 
