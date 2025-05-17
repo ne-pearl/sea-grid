@@ -143,7 +143,7 @@ def network_incidence(ell: int, b: int) -> int:
         return 0
 
 
-def supply_incidence(o: int, g: int, b: int) -> bool:
+def supply_incidence(b: int, g: int, o: int) -> bool:
     bus_generator: bool = buses[b, "id"] == generators[g, "bus_id"]
     generator_offer: bool = generators[g, "id"] == offers[o, "generator_id"]
     return bus_generator and generator_offer
@@ -152,10 +152,10 @@ def supply_incidence(o: int, g: int, b: int) -> bool:
 line_bus_incidence = np.array(
     [[network_incidence(ell, b) for b in Buses] for ell in Lines]
 )
-offer_bus_incidence = np.array(
+bus_offer_incidence = np.array(
     [
-        [any(supply_incidence(o, g, b) for g in Generators) for b in Buses]
-        for o in Offers
+        [any(supply_incidence(b, g, o) for g in Generators) for o in Offers]
+        for b in Buses
     ],
     dtype=float,
 )
@@ -166,7 +166,7 @@ def balance_rule(model: Model, b: int) -> EqualityExpression:
         sum(
             alpha * model.p[o]
             for o in Offers
-            if (alpha := offer_bus_incidence[o, b]) != 0
+            if (alpha := bus_offer_incidence[b, o]) != 0
         )
         + sum(
             beta * model.f[ell]
@@ -241,7 +241,7 @@ buses = buses.with_columns(
     angle_deg=pl.Series(angles_deg),
     price=pl.Series(load_marginal_prices),
     quantity=pl.Series(
-        sum(offer_bus_incidence[o, b] * quantity[o] for o in Offers) for b in Buses
+        sum(bus_offer_incidence[b, o] * quantity[o] for o in Offers) for b in Buses
     ),
 )
 
