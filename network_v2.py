@@ -9,6 +9,7 @@ import numpy as np
 import polars as pl
 import pyomo.environ as pyo
 from pyomo.core import Model
+from pyomo.core.base.param import ParamData
 from pyomo.core.expr.relational_expr import EqualityExpression
 
 # Prevent truncation of tall tables
@@ -61,9 +62,9 @@ lines = lines.with_columns(
 
 offers = pl.DataFrame(
     {
-        "generator_id": ["G1", "G2", "G3", "G1", "G2", "G3", "G1", "G2", "G3"],
-        "max_quantity": [200.0, 200.0, 200.0, 100.0, 100.0, 100.0, 200.0, 200.0, 200.0],
-        "price": [10.00, 12.00, 14.00, 20.00, 22.00, 24.00, 15.00, 16.00, 17.00],
+        "generator_id": ["G1", "G2", "G3", "G1", "G2", "G3"],
+        "max_quantity": [200.0, 200.0, 200.0, 100.0, 100.0, 100.0],
+        "price": [10.00, 12.00, 14.00, 20.00, 22.00, 24.00],
     },
     schema={"generator_id": Id, "max_quantity": MW, "price": USDPerMWh},
 ).sort(by=["generator_id", "price"])
@@ -138,23 +139,22 @@ def supply_incidence(b: int, g: int, o: int) -> bool:
     return bus_generator and generator_offer
 
 
-bus_to_line = np.array([[network_incidence(b, ell) for ell in Lines] for b in Buses])
-bus_to_offer = np.array(
+bus_line_incidence = np.array(
+    [[network_incidence(b, ell) for ell in Lines] for b in Buses]
+)
+bus_offer_incidence = np.array(
     [
         [any(supply_incidence(b, g, o) for g in Generators) for o in Offers]
         for b in Buses
-    ]
+    ],
+    dtype=float,
 )
 
 
 def balance_rule(model: Model, b: int) -> EqualityExpression:
     return (
-        sum(model.p[o] for g in Generators for o in Offers if supply_incidence(b, g, o))
-        + sum(
-            sign * model.f[ell]
-            for ell in Lines
-            if (sign := network_incidence(b, ell)) != 0
-        )
+        sum(bus_offer_incidence[b, o] * model.p[o] for o in Offers)
+        + sum(bus_line_incidence[b, ell] * model.f[ell] for ell in Lines)
         == model.loads[b]
     )
 
@@ -162,7 +162,7 @@ def balance_rule(model: Model, b: int) -> EqualityExpression:
 def flow_rule(model: Model, ell: int) -> EqualityExpression:
     return (
         sum(
-            sign * model.susceptances[b] * model.theta[b]
+            sign * model.susceptances[ell] * model.theta[b]
             for b in Buses
             if (sign := network_incidence(b, ell))
         )
@@ -187,23 +187,25 @@ def optimize(model, **kwargs) -> float:
 
 
 total_cost = optimize(model, tee=True)  # tee output to console
-load_payments = 0
-generator_payments = 0
 
 # Transfer solution to tables
 quantity = [pyo.value(model.p[o]) for o in Offers]
 flow = [pyo.value(model.f[ell]) for ell in Lines]
 angles_deg = [pyo.value(model.theta[b]) * 180 / math.pi for b in Buses]
-marginal_prices = [model.dual[model.balance[b]] for b in Buses]
+load_marginal_prices = [model.dual[model.balance[b]] for b in Buses]
+flow_marginal_prices = [model.dual[model.flow[ell]] for ell in Lines]
 
 # Extend data tables with decision variables
 offers = offers.with_columns(quantity=pl.Series(quantity))
 lines = lines.with_columns(flow=pl.Series(flow))
 buses = buses.with_columns(
-    angle_deg=pl.Series(angles_deg), price=pl.Series(marginal_prices)
+    angle_deg=pl.Series(angles_deg),
+    price=pl.Series(load_marginal_prices),
+    quantity=pl.Series(
+        sum(bus_offer_incidence[b, o] * quantity[o] for o in Offers) for b in Buses
+    ),
 )
 
-# Extend data tables with post-processed quantities
 lines = lines.with_columns(  # utilization of each line
     (pl.col("flow").abs() / pl.col("capacity")).alias("utilization")
 )
@@ -219,23 +221,23 @@ print("lines -", lines)
 print("buses -", buses)
 print("generators -", generators)
 
+load_payment = sum(buses[b, "load"] * load_marginal_prices[b] for b in Buses)
+
+
 # Evaluate marginal prices
+def direct_marginal_price(model, parameter: ParamData, delta=1.0) -> float:
+    original = parameter.value
+    unperturbed = optimize(model)
+    parameter.value += delta
+    perturbed = optimize(model)
+    parameter.value = original  # restore
+    return (perturbed - unperturbed) / delta
 
 
-def marginal_price_estimate(model, b: int, delta_load: float = 1.0) -> float:
-    # Restore nominal state before perturbation
-    # (copy.deepcopy of pyomo models is not officially supported)
-    f_unperturbed = optimize(model)
-    load_original = model.loads[b]
-    model.loads[b] += delta_load  # increment load at bus b
-    f_perturbed = optimize(model)
-    model.loads[b] = load_original  # restore model for next time
-    return (f_perturbed - f_unperturbed) / delta_load
+load_marginal_price_estimates = [direct_marginal_price(model, model.loads[b]) for b in Buses]
+flow_marginal_price_estimates = [direct_marginal_price(model, model.loads[b]) for b in Buses]
 
-
-marginal_price_estimates = [marginal_price_estimate(model, b) for b in Buses]
-print(f"marginal_price_estimates = {marginal_price_estimates}")
-assert marginal_price_estimates == marginal_prices
+assert np.allclose(load_marginal_price_estimates, load_marginal_prices)
 
 # Helper functions for plotting
 
@@ -363,12 +365,12 @@ nx.draw_networkx_edge_labels(
     font_size=font_size,
     font_color="blue",
 )
-                                
+
 # Display network
 plt.title(
-    f"            Total Cost: ${total_cost:.2f}/h\n"
-    f"    Payments from Load: ${load_payments:.2f}/h\n"
-    f"Payments to Generators: ${generator_payments:.2f}/h\n"
+    f"      Paid by Load: ${load_payment:.2f}/h\n"
+    f"Paid to Generators: ${total_cost:.2f}/h\n"
+    f" Congestion Charge: ${load_payment - total_cost:.2f}/h"
 )
 plt.axis("off")
 plt.savefig("network.png", dpi=300)
