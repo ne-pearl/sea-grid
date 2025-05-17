@@ -95,6 +95,11 @@ model.susceptances = pyo.Param(
     initialize={ell: lines[ell, "susceptance"] for ell in Lines},
     doc="susceptance (1/reactance) @ line [MW/rad]",
 )
+model.line_capacities = pyo.Param(
+    Lines,
+    initialize={ell: lines[ell, "capacity"] for ell in Lines},
+    doc="capacity @ line [MW]",
+)
 
 
 # Model decision variables
@@ -103,7 +108,7 @@ def supply_bounds(model: Model, o: int) -> tuple[float, float]:
 
 
 def flow_bounds(model: Model, ell: int) -> tuple[float, float]:
-    capacity = lines[ell, "capacity"]
+    capacity = model.line_capacities[ell]
     return (-capacity, +capacity)
 
 
@@ -234,8 +239,12 @@ def direct_marginal_price(model, parameter: ParamData, delta=1.0) -> float:
     return (perturbed - unperturbed) / delta
 
 
-load_marginal_price_estimates = [direct_marginal_price(model, model.loads[b]) for b in Buses]
-flow_marginal_price_estimates = [direct_marginal_price(model, model.loads[b]) for b in Buses]
+load_marginal_price_estimates = [
+    direct_marginal_price(model, model.loads[b]) for b in Buses
+]
+flow_marginal_price_estimates = [
+    direct_marginal_price(model, model.loads[b]) for b in Buses
+]
 
 assert np.allclose(load_marginal_price_estimates, load_marginal_prices)
 
@@ -373,7 +382,8 @@ plt.title(
     f" Congestion Charge: ${load_payment - total_cost:.2f}/h"
 )
 plt.axis("off")
-plt.savefig("network.png", dpi=300)
+plt.margins(x=0.2, y=0.2)
+plt.savefig("network.png", dpi=600, bbox_inches="tight")
 plt.show(block=False)
 
 # Path analysis
