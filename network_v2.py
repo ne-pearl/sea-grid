@@ -134,7 +134,7 @@ model.total_cost = pyo.Objective(
 # Model constraints
 
 
-def network_incidence(b: int, ell: int) -> int:
+def network_incidence(ell: int, b: int) -> int:
     if buses[b, "id"] == lines[ell, "from_bus_id"]:
         return -1
     if buses[b, "id"] == lines[ell, "to_bus_id"]:
@@ -143,19 +143,19 @@ def network_incidence(b: int, ell: int) -> int:
         return 0
 
 
-def supply_incidence(b: int, g: int, o: int) -> bool:
+def supply_incidence(o: int, g: int, b: int) -> bool:
     bus_generator: bool = buses[b, "id"] == generators[g, "bus_id"]
     generator_offer: bool = generators[g, "id"] == offers[o, "generator_id"]
     return bus_generator and generator_offer
 
 
-bus_line_incidence = np.array(
-    [[network_incidence(b, ell) for ell in Lines] for b in Buses]
+line_bus_incidence = np.array(
+    [[network_incidence(ell, b) for b in Buses] for ell in Lines]
 )
-bus_offer_incidence = np.array(
+offer_bus_incidence = np.array(
     [
-        [any(supply_incidence(b, g, o) for g in Generators) for o in Offers]
-        for b in Buses
+        [any(supply_incidence(o, g, b) for g in Generators) for b in Buses]
+        for o in Offers
     ],
     dtype=float,
 )
@@ -163,8 +163,16 @@ bus_offer_incidence = np.array(
 
 def balance_rule(model: Model, b: int) -> EqualityExpression:
     return (
-        sum(bus_offer_incidence[b, o] * model.p[o] for o in Offers)
-        + sum(bus_line_incidence[b, ell] * model.f[ell] for ell in Lines)
+        sum(
+            alpha * model.p[o]
+            for o in Offers
+            if (alpha := offer_bus_incidence[o, b]) != 0
+        )
+        + sum(
+            beta * model.f[ell]
+            for ell in Lines
+            if (beta := line_bus_incidence[ell, b]) != 0
+        )
         == model.loads[b]
     )
 
@@ -172,9 +180,9 @@ def balance_rule(model: Model, b: int) -> EqualityExpression:
 def flow_rule(model: Model, ell: int) -> EqualityExpression:
     return (
         sum(
-            sign * model.susceptances[ell] * model.theta[b]
+            gamma * model.susceptances[ell] * model.theta[b]
             for b in Buses
-            if (sign := network_incidence(b, ell))
+            if (gamma := line_bus_incidence[ell, b]) != 0
         )
         == model.f[ell]
     )
@@ -233,7 +241,7 @@ buses = buses.with_columns(
     angle_deg=pl.Series(angles_deg),
     price=pl.Series(load_marginal_prices),
     quantity=pl.Series(
-        sum(bus_offer_incidence[b, o] * quantity[o] for o in Offers) for b in Buses
+        sum(offer_bus_incidence[o, b] * quantity[o] for o in Offers) for b in Buses
     ),
 )
 
@@ -357,6 +365,8 @@ scale = 50.0
 pos: dict = hybrid_layout(
     network, hub_scale=scale, satellite_scale=scale, k=scale * 1.0
 )
+
+plt.figure(figsize=(15, 9), dpi=80);
 
 # Network annotation
 font_size = 8
