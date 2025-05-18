@@ -16,6 +16,9 @@ from pyomo.core.expr.relational_expr import EqualityExpression, InequalityExpres
 IPython.core.interactiveshell.InteractiveShell.ast_node_interactivity = "all"
 pl.Config.set_tbl_rows(-1)  # "unlimited rows"
 
+# Set random seed for reproducibility of networkx graph layouts
+np.random.seed(0)
+
 # Units of measure
 Id: TypeAlias = pl.String
 MW: TypeAlias = pl.Float64
@@ -367,7 +370,7 @@ network = nx.DiGraph()
 # Node defnition
 bus_price_labels = mapvalues("${:.2f}/MWh".format, buses["id"], buses["price"])
 offer_price_labels = mapvalues(
-    "{:}MW\n@ ${:}/MWh".format, offers["id"], offers["max_quantity"], offers["price"]
+    "≤{:}MW\n@ ${:}/MWh".format, offers["id"], offers["max_quantity"], offers["price"]
 )
 demand_labels = mapvalues("{:}MW".format, demands["id"], demands["load"])
 
@@ -396,10 +399,7 @@ flow_labels = mapvalues(
     lines["capacity"],
 )
 supply_labels = mapvalues(
-    "{:.0f}MW/\n{:.0f}MW".format,
-    zip(offers["id"], offers["bus_id"]),
-    offers["quantity"],
-    offers["max_quantity"],
+    "{:.0f}MW".format, zip(offers["id"], offers["bus_id"]), offers["quantity"]
 )
 demand_load_labels = mapvalues(
     "{:.0f}MW".format,
@@ -441,7 +441,7 @@ nx.draw_networkx_labels(
     pos,
     labels={id: id for id in buses["id"]},
     font_size=font_size,
-    font_color="red",
+    font_color="black",
 )
 nx.draw_networkx_labels(
     network,
