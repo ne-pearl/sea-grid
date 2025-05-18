@@ -30,6 +30,9 @@ buses = pl.DataFrame(
     },
     schema={"id": Id, "load": MW},
 )
+
+reference_bus_id = 0
+
 generators = pl.DataFrame(  # excludes "capacity", "cost"!
     {
         "id": ["G1", "G2", "G3"],
@@ -159,6 +162,7 @@ bus_offer_incidence = np.array(
     ],
     dtype=float,
 )
+bus_load_incidence = np.diag(-np.ones(len(Buses)))
 
 
 def balance_rule(model: Model, b: int) -> EqualityExpression:
@@ -191,7 +195,7 @@ def flow_rule(model: Model, ell: int) -> EqualityExpression:
 model.balance = pyo.Constraint(Buses, rule=balance_rule, doc="power balance @ bus")
 model.flow = pyo.Constraint(Lines, rule=flow_rule, doc="power flow @ line")
 model.reference_angle = pyo.Constraint(
-    expr=model.theta[0] == 0.0, doc="reference voltage angle @ bus[0]"
+    expr=model.theta[reference_bus_id] == 0, doc="reference voltage angle @ bus[0]"
 )
 
 
@@ -227,18 +231,36 @@ model.dual.pprint()
 # Transfer solution to tables
 quantity = [pyo.value(model.p[o]) for o in Offers]
 flow = [pyo.value(model.f[ell]) for ell in Lines]
-angles_deg = [pyo.value(model.theta[b]) * 180 / math.pi for b in Buses]
+angle = [pyo.value(model.theta[b]) for b in Buses]
 load_marginal_prices = [model.dual[model.balance[b]] for b in Buses]
 flow_marginal_prices = np.add(
     [model.dual[model.flow_bounds_lower[ell]] for ell in Lines],
     [model.dual[model.flow_bounds_upper[ell]] for ell in Lines],
 )
 
+free_bus_ids = [b for b in Buses if b != reference_bus_id]
+K = line_bus_incidence[:, free_bus_ids]
+KtB = K.T @ np.diag(lines[:, "susceptance"])
+SF = np.linalg.solve(KtB @ K, -KtB).T
+injections = bus_offer_incidence @ quantity - buses[:,"load"].to_numpy()
+
+assert np.allclose(lines[:, "susceptance"] * (line_bus_incidence @ angle), flow)
+assert np.allclose(
+    buses[:, "load"] - bus_offer_incidence @ quantity, line_bus_incidence.T @ flow
+)
+assert np.allclose(
+    buses[:, "load"] - bus_offer_incidence @ quantity,
+    line_bus_incidence.T @ (lines[:, "susceptance"] * (line_bus_incidence @ angle)),
+)
+assert np.allclose(SF @ injections[free_bus_ids], flow)
+
+SF @ injections[free_bus_ids]
+
 # Extend data tables with decision variables
 offers = offers.with_columns(quantity=pl.Series(quantity))
 lines = lines.with_columns(flow=pl.Series(flow))
 buses = buses.with_columns(
-    angle_deg=pl.Series(angles_deg),
+    angle_deg=pl.Series(np.rad2deg(angle)),
     price=pl.Series(load_marginal_prices),
     quantity=pl.Series(
         sum(bus_offer_incidence[b, o] * quantity[o] for o in Offers) for b in Buses
@@ -366,7 +388,7 @@ pos: dict = hybrid_layout(
     network, hub_scale=scale, satellite_scale=scale, k=scale * 1.0
 )
 
-plt.figure(figsize=(15, 9), dpi=80);
+plt.figure(figsize=(15, 9), dpi=80)
 
 # Network annotation
 font_size = 8
