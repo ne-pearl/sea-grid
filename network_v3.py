@@ -39,15 +39,12 @@ demands = pl.DataFrame(
     schema={"id": Id, "bus_id": Id, "load": MW},
 )
 
-buses = (
-    buses.join(  # bus_id for each offer
-        demands.group_by("bus_id").agg(pl.col("load").sum()),
-        left_on="id",
-        right_on="bus_id",
-        how="left",
-    )
-    .with_columns(pl.col("load").fill_null(0.0))
-)
+buses = buses.join(  # bus_id for each offer
+    demands.group_by("bus_id").agg(pl.col("load").sum()),
+    left_on="id",
+    right_on="bus_id",
+    how="left",
+).with_columns(pl.col("load").fill_null(0.0))
 
 reference_bus = 0
 
@@ -374,6 +371,8 @@ bus_price_labels = mapvalues(
 offer_price_labels = mapvalues(
     "{:}MW\n@ ${:}/MWh".format, offers["id"], offers["max_quantity"], offers["price"]
 )
+demand_labels = mapvalues("{:}MW".format, demands["id"], demands["load"])
+
 load_norm = mc.Normalize(vmin=min(buses["load"]), vmax=max(buses["load"]))
 load_cmap = cm.coolwarm  # Or plasma, inferno, magma, coolwarm, etc.
 bus_colors = [load_cmap(load_norm(load)) for load in buses["load"]]
@@ -387,7 +386,8 @@ offer_colors = [generator_colors[gid] for gid in offers["generator_id"]]
 
 network.add_nodes_from(buses["id"])
 network.add_nodes_from(offers["id"])
-node_labels = bus_price_labels | offer_price_labels
+network.add_nodes_from(demands["id"])
+node_labels = bus_price_labels | offer_price_labels | demand_labels
 
 # Edge defnition
 flow_labels = mapvalues(
@@ -402,10 +402,16 @@ supply_labels = mapvalues(
     offers["quantity"],
     offers["max_quantity"],
 )
+demand_load_labels = mapvalues(
+    "{:.0f}MW".format,
+    zip(demands["bus_id"], demands["id"]),
+    demands["load"],
+)
 network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
 network.add_edges_from(zip(offers["id"], offers["bus_id"]))
+network.add_edges_from(zip(demands["bus_id"], demands["id"]))
 edge_utilization = [*lines["utilization"], *offers["utilization"]]
-edge_labels = flow_labels | supply_labels
+edge_labels = flow_labels | supply_labels | demand_load_labels
 
 # Network layout
 scale = 50.0
