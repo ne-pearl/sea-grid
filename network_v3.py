@@ -335,39 +335,37 @@ def mapvalues(f, keys, *values) -> dict:
 
 
 def hybrid_layout(
-    G: nx.Graph,
+    graph: nx.Graph,
     hub_scale: float = 1.0,
     satellite_scale: float = 1.0,
     k: float = 0.4,
     seed: int = 0,
+    **kwargs,
 ) -> dict:
-    """Produces a better outcome than either pure layout provided by networkx"""
-    hubs = [n for n in G.nodes if G.degree(n) > 1]
-    pos = nx.kamada_kawai_layout(G.subgraph(hubs), scale=hub_scale)
+    """
+    This hybrid layout seems to produce better outcome than the pure layout provided by networkx.
+    """
+    # Work-around: spring_layout allows orientation to influence layout in evil ways
+    assert not graph.is_directed()
+    hubs = [n for n in graph.nodes if graph.degree(n) > 1]
+    pos = nx.kamada_kawai_layout(graph.subgraph(hubs), scale=hub_scale)
     for hub in hubs:
-        satellites = {
-            *G.successors(hub),
-            *G.predecessors(hub),
-        }.difference(hubs)
-        pos.update(
-            nx.circular_layout(
-                G.subgraph(satellites),
-                center=pos[hub],
-                scale=satellite_scale,
-            )
+        satellites = {*graph.neighbors(hub)}.difference(hubs)
+        satpos = nx.circular_layout(
+            graph.subgraph(satellites),
+            center=pos[hub],
+            scale=satellite_scale,
         )
-        print(f"{hub} => {satellites}")
-    assert len(pos) == G.number_of_nodes()
-    return nx.spring_layout(G, pos=pos, fixed=hubs, seed=seed, k=k)
+        pos.update(satpos)
+    assert len(pos) == graph.number_of_nodes()
+    return nx.spring_layout(graph, pos=pos, fixed=hubs, k=k, seed=seed, **kwargs)
 
 
 # Network definition for plotting
 network = nx.DiGraph()
 
 # Node defnition
-bus_price_labels = mapvalues(
-    "{:}MW\n@ ${:.2f}/MWh".format, buses["id"], buses["load"], buses["price"]
-)
+bus_price_labels = mapvalues("${:.2f}/MWh".format, buses["id"], buses["price"])
 offer_price_labels = mapvalues(
     "{:}MW\n@ ${:}/MWh".format, offers["id"], offers["max_quantity"], offers["price"]
 )
@@ -383,6 +381,7 @@ generator_colors = {
     gid: mc.to_hex(generator_cmap(i)) for i, gid in enumerate(generators["id"])
 }
 offer_colors = [generator_colors[gid] for gid in offers["generator_id"]]
+demand_colors = ["red" for demand in demands["id"]]
 
 network.add_nodes_from(buses["id"])
 network.add_nodes_from(offers["id"])
@@ -410,16 +409,21 @@ demand_load_labels = mapvalues(
 network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
 network.add_edges_from(zip(offers["id"], offers["bus_id"]))
 network.add_edges_from(zip(demands["bus_id"], demands["id"]))
-edge_utilization = [*lines["utilization"], *offers["utilization"]]
+edge_utilization = [
+    *lines["utilization"],
+    *offers["utilization"],
+    *([1.0] * len(Demands)),
+]
 edge_labels = flow_labels | supply_labels | demand_load_labels
 
 # Network layout
-scale = 50.0
+scale = 1.5  # 50.0
 pos: dict = hybrid_layout(
-    network, hub_scale=scale, satellite_scale=scale, k=scale * 1.0
+    network.to_undirected(), hub_scale=scale, satellite_scale=scale, k=scale
 )
 
 plt.figure(figsize=(15, 9), dpi=80)
+plt.axis("equal")
 
 # Network annotation
 font_size = 8
@@ -428,6 +432,9 @@ nx.draw_networkx_nodes(
 )
 nx.draw_networkx_nodes(
     network, pos, nodelist=offers["id"], node_color=offer_colors, node_shape="o"
+)
+nx.draw_networkx_nodes(
+    network, pos, nodelist=demands["id"], node_color=demand_colors, node_shape="^"
 )
 nx.draw_networkx_labels(
     network,
@@ -440,6 +447,13 @@ nx.draw_networkx_labels(
     network,
     pos,
     labels={id: id for id in offers["id"]},
+    font_size=font_size,
+    font_color="black",
+)
+nx.draw_networkx_labels(
+    network,
+    pos,
+    labels={id: id for id in demands["id"]},
     font_size=font_size,
     font_color="black",
 )
