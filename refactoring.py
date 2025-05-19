@@ -1,30 +1,60 @@
 import dataclasses
 import math
-import random
-from typing import Any, Callable, Iterable, Self, TypeAlias
-import IPython
-import matplotlib.cm as cm
-import matplotlib.colors as mc
-import matplotlib.pyplot as plt
-import networkx as nx
+import textwrap
+from typing import Callable, Optional, Self
 import numpy as np
+from numpy.typing import NDArray
 import polars as pl
 import pyomo.environ as pyo
 from pyomo.core import Model
-from pyomo.core.base.param import ParamData
 from pyomo.core.expr.relational_expr import EqualityExpression, InequalityExpression
 
 
 @dataclasses.dataclass(frozen=True, repr=False, slots=True)
-class Network:
-    bus_load: np.ndarray
-    line_capacity: np.ndarray
-    line_susceptance: np.ndarray
-    offer_max_quantity: np.ndarray
-    offer_price: np.ndarray
-    line_bus_incidence: np.ndarray
-    offer_bus_incidence: np.ndarray
-    reference_bus: int = 0
+class Serialization:
+
+    def _generate(self, string: Callable, outer: str, inner: str) -> str:
+        """Shared logic of __repr__ and __str__."""
+
+        def indent(text: str) -> str:
+            return textwrap.indent(text, " " * 4)
+
+        body = "\n".join(
+            inner.format(
+                name=field.name, value=indent(string(getattr(self, field.name)))
+            )
+            for field in dataclasses.fields(self)
+        )
+
+        return outer.format(name=type(self).__name__, value=indent(body))
+
+    def __repr__(self) -> str:
+        """String representation."""
+        return self._generate(
+            repr,
+            outer="{name}(\n{value}\n)",
+            inner="{name}=\\\n{value},",
+        )
+
+    def __str__(self) -> str:
+        """Pretty-print."""
+        return self._generate(
+            str,
+            outer="{{\n{value}\n}}",
+            inner="{name}:\n{value}",
+        )
+
+
+@dataclasses.dataclass(frozen=True, repr=False, slots=True)
+class Data(Serialization):
+    bus_load: NDArray[np.float64]
+    line_capacity: NDArray[np.float64]
+    line_susceptance: NDArray[np.float64]
+    offer_max_quantity: NDArray[np.float64]
+    offer_price: NDArray[np.float64]
+    line_bus_incidence: NDArray[np.int8]
+    offer_bus_incidence: NDArray[np.int8]
+    reference_bus: int
 
     def __post_init__(self) -> None:
         """Validate array dimensions."""
@@ -104,16 +134,19 @@ class Network:
             offer_price=offers[:, "price"].to_numpy(),
             line_bus_incidence=line_bus_incidence,
             offer_bus_incidence=offer_bus_incidence,
+            reference_bus=reference_bus,
         )
 
-    def __repr__(self) -> str:
-        """String representation (not a true __repr__)."""
-        return "\n".join(
-            (
-                f"{field.name}:\n{repr(getattr(self, field.name))}"
-                for field in dataclasses.fields(self)
-            )
-        )
+
+@dataclasses.dataclass(frozen=True, repr=False, slots=True)
+class Result(Serialization):
+    total_cost: float
+    dispatch_quantity: NDArray[np.float64]
+    line_flow: NDArray[np.float64]
+    voltage_angle: NDArray[np.float64]
+    energy_price: Optional[NDArray[np.float64]] = None
+    congestion_price: Optional[NDArray[np.float64]] = None
+    loss_price: Optional[NDArray[np.float64]] = None
 
 
 def objective_value(solver, model, **kwargs) -> float:
@@ -123,50 +156,33 @@ def objective_value(solver, model, **kwargs) -> float:
     return pyo.value(model.total_cost)
 
 
-def formulate(
-    buses: pl.DataFrame,
-    demands: pl.DataFrame,
-    generators: pl.DataFrame,
-    lines: pl.DataFrame,
-    offers: pl.DataFrame,
-    reference_bus: int = 0,
-) -> None:
+def formulate(data, solver, tee: bool = False) -> Model:
     """Formulate the optimization problem for the given power system data."""
 
-    ##############################################################################
-    # Index sets
-    ##############################################################################
-
-    bus_indices = range(buses.height)
-    demand_indices = range(demands.height)
-    generator_indices = range(generators.height)
-    line_indices = range(lines.height)
-    offer_indices = range(offers.height)
-
-    ##############################################################################
-    # Optimization model parameters
-    ##############################################################################
-
     model = pyo.ConcreteModel()
+
+    # Index sets
+    bus_indices = range(data.bus_load.size)
+    line_indices = range(data.line_bus_incidence.shape[0])
+    offer_indices = range(data.offer_bus_incidence.shape[0])
+
+    # Parameters for pricing
     model.loads = pyo.Param(
         bus_indices,
-        initialize={b: buses[b, "load"] for b in bus_indices},
+        initialize={b: data.bus_load[b] for b in bus_indices},
         mutable=True,
         doc="load (demand) @ bus [MW]",
     )
     model.line_capacities = pyo.Param(
         line_indices,
-        initialize={ell: lines[ell, "capacity"] for ell in line_indices},
+        initialize={ell: data.line_capacity[ell] for ell in line_indices},
         mutable=True,
         doc="capacity @ line [MW]",
     )
 
-    ##############################################################################
-    # Optimization model decision variables & bounds
-    ##############################################################################
-
+    # Decision variables & bounds
     def supply_bounds(model: Model, o: int) -> tuple[float, float]:
-        return (0.0, offers[o, "max_quantity"])
+        return (0.0, data.offer_max_quantity[o])
 
     model.p = pyo.Var(
         offer_indices, bounds=supply_bounds, doc="power injection @ offer [MW]"
@@ -177,55 +193,11 @@ def formulate(
     )
     model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
-    ##############################################################################
-    # Optimization model objective function
-    ##############################################################################
-
+    # Objective function
     model.total_cost = pyo.Objective(
-        expr=sum(offers[o, "price"] * model.p[o] for o in offer_indices),
+        expr=sum(data.offer_price[o] * model.p[o] for o in offer_indices),
         sense=pyo.minimize,
         doc="total operating cost [$/h]",
-    )
-
-    ##############################################################################
-    # Optimization model equality constraints
-    ##############################################################################
-
-    def network_incidence(ell: int, b: int) -> int:
-        if buses[b, "id"] == lines[ell, "from_bus_id"]:
-            return -1
-        if buses[b, "id"] == lines[ell, "to_bus_id"]:
-            return +1
-        else:
-            return 0
-
-    def supply_incidence(o: int, b: int, g: int) -> bool:
-        bus_generator: bool = buses[b, "id"] == generators[g, "bus_id"]
-        generator_offer: bool = generators[g, "id"] == offers[o, "generator_id"]
-        return bus_generator and generator_offer
-
-    def load_incidence(d: int, b: int) -> bool:
-        if buses[b, "id"] == demands[d, "bus_id"]:
-            return -1
-        else:
-            return 0
-
-    line_bus_incidence = np.array(
-        [[network_incidence(ell, b) for b in bus_indices] for ell in line_indices]
-    )
-    offer_bus_incidence = np.array(
-        [
-            [
-                any(supply_incidence(o, b, g) for g in generator_indices)
-                for b in bus_indices
-            ]
-            for o in offer_indices
-        ],
-        dtype=float,
-    )
-    bus_load_incidence = np.array(
-        [[load_incidence(d, b) for b in bus_indices] for d in demand_indices],
-        dtype=float,
     )
 
     def balance_rule(model: Model, b: int) -> EqualityExpression:
@@ -233,12 +205,12 @@ def formulate(
             sum(
                 alpha * model.p[o]
                 for o in offer_indices
-                if (alpha := offer_bus_incidence[o, b]) != 0
+                if (alpha := data.offer_bus_incidence[o, b]) != 0
             )
             + sum(
                 beta * model.f[ell]
                 for ell in line_indices
-                if (beta := line_bus_incidence[ell, b]) != 0
+                if (beta := data.line_bus_incidence[ell, b]) != 0
             )
             == model.loads[b]
         )
@@ -248,11 +220,12 @@ def formulate(
             sum(
                 gamma * model.theta[b] * lines[ell, "susceptance"]
                 for b in bus_indices
-                if (gamma := line_bus_incidence[ell, b]) != 0
+                if (gamma := data.line_bus_incidence[ell, b]) != 0
             )
             == model.f[ell]
         )
 
+    # Equality constraints
     model.balance = pyo.Constraint(
         bus_indices, rule=balance_rule, doc="power balance @ bus"
     )
@@ -261,16 +234,15 @@ def formulate(
         expr=model.theta[reference_bus] == 0, doc="reference voltage angle @ bus[0]"
     )
 
-    ##############################################################################
-    # Optimization model inequality constraints
-    ##############################################################################
-
     def flow_bound_lower_rule(model: Model, ell: int) -> InequalityExpression:
         return -model.line_capacities[ell] <= model.f[ell]
 
     def flow_bound_upper_rule(model: Model, ell: int) -> InequalityExpression:
         return model.f[ell] <= model.line_capacities[ell]
 
+    # Inequality constraints:
+    # NB: Implemented as a general Constraint because
+    # some solvers do not support sensitivity analysis on Var bounds
     model.flow_bounds_lower = pyo.Constraint(
         line_indices, rule=flow_bound_lower_rule, doc="flow lower bound @ line"
     )
@@ -278,37 +250,34 @@ def formulate(
         line_indices, rule=flow_bound_upper_rule, doc="flow upper bound @ line"
     )
 
-    ##############################################################################
     # Solve optimization model
-    ##############################################################################
+    total_cost = objective_value(solver, model, tee=tee)
 
-    solver = pyo.SolverFactory("highs")
-    total_cost = objective_value(solver, model, tee=True)  # tee output to console
-
-    ##############################################################################
     # Extract optimal decision values
-    ##############################################################################
-
-    quantity = [pyo.value(model.p[o]) for o in offer_indices]
-    flow = [pyo.value(model.f[ell]) for ell in line_indices]
-    angle = [pyo.value(model.theta[b]) for b in bus_indices]
-    load_marginal_prices = [model.dual[model.balance[b]] for b in bus_indices]
-    flow_marginal_prices = np.add(
-        [model.dual[model.flow_bounds_lower[ell]] for ell in line_indices],
-        [model.dual[model.flow_bounds_upper[ell]] for ell in line_indices],
+    return Result(
+        total_cost=total_cost,
+        dispatch_quantity=np.array([pyo.value(model.p[o]) for o in offer_indices]),
+        line_flow=np.array([pyo.value(model.f[ell]) for ell in line_indices]),
+        voltage_angle=np.array([pyo.value(model.theta[b]) for b in bus_indices]),
+        energy_price=np.array([model.dual[model.balance[b]] for b in bus_indices]),
+        congestion_price=np.array(
+            [
+                model.dual[model.flow_bounds_upper[ell]]
+                - model.dual[model.flow_bounds_lower[ell]]
+                for ell in line_indices
+            ]
+        ),
     )
-
-    return model
 
 
 # Units of measure
-Id: TypeAlias = pl.String
-MW: TypeAlias = pl.Float64
-MWPerRad: TypeAlias = pl.Float64
-USDPerMWh: TypeAlias = pl.Float64
+Id = pl.String
+MW = pl.Float64
+MWPerRad = pl.Float64
+USDPerMWh = pl.Float64
 
 ##############################################################################
-# Network data
+# Data data
 ##############################################################################
 
 buses = pl.DataFrame(
@@ -383,12 +352,12 @@ for column in [
     offers = offers.with_columns(column)
 
 
-model = formulate(
-    buses=buses, demands=demands, generators=generators, lines=lines, offers=offers
+net = Data.init(
+    buses=buses,
+    demands=demands,
+    generators=generators,
+    lines=lines,
+    offers=offers,
 )
-model.pprint()
-
-
-net = Network.init(
-    buses=buses, demands=demands, generators=generators, lines=lines, offers=offers
-)
+solver = pyo.SolverFactory("highs")
+result = formulate(net, solver)
