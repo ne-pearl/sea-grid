@@ -1,4 +1,5 @@
 import math
+import random
 from typing import Any, Callable, Iterable, TypeAlias
 import IPython
 import matplotlib.cm as cm
@@ -17,6 +18,7 @@ IPython.core.interactiveshell.InteractiveShell.ast_node_interactivity = "all"
 pl.Config.set_tbl_rows(-1)  # "unlimited rows"
 
 # Set random seed for reproducibility of networkx graph layouts
+random.seed(0)
 np.random.seed(0)
 
 # Units of measure
@@ -442,11 +444,6 @@ flow_labels = mapvalues(
 supply_labels = mapvalues(
     "{:.0f}MW".format, zip(offers["id"], offers["bus_id"]), offers["quantity"]
 )
-demand_load_labels = mapvalues(
-    "{:.0f}MW".format,
-    zip(demands["bus_id"], demands["id"]),
-    demands["load"],
-)
 network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
 network.add_edges_from(zip(offers["id"], offers["bus_id"]))
 network.add_edges_from(zip(demands["bus_id"], demands["id"]))
@@ -455,7 +452,7 @@ edge_utilization = [
     *offers["utilization"],
     *([1.0] * len(Demands)),
 ]
-edge_labels = flow_labels | supply_labels | demand_load_labels
+edge_labels = flow_labels | supply_labels
 
 # Network layout
 scale = 1.5  # 50.0
