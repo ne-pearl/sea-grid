@@ -28,6 +28,7 @@ USDPerMWh: TypeAlias = pl.Float64
 ##############################################################################
 # Network data
 ##############################################################################
+
 buses = pl.DataFrame(
     {
         "id": ["B1", "B2", "B3"],
@@ -132,8 +133,11 @@ model.line_capacities = pyo.Param(
     doc="capacity @ line [MW]",
 )
 
+##############################################################################
+# Optimization model decision variables & bounds
+##############################################################################
 
-# Model decision variables
+
 def supply_bounds(model: Model, o: int) -> tuple[float, float]:
     return (0.0, offers[o, "max_quantity"])
 
@@ -154,14 +158,19 @@ model.theta = pyo.Var(
 )
 model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
-# Model objective function
+##############################################################################
+# Optimization model objective function
+##############################################################################
+
 model.total_cost = pyo.Objective(
     expr=sum(offers[o, "price"] * model.p[o] for o in Offers),
     sense=pyo.minimize,
     doc="total operating cost [$/h]",
 )
 
-# Model constraints
+##############################################################################
+# Optimization model equality constraints
+##############################################################################
 
 
 def network_incidence(ell: int, b: int) -> int:
@@ -171,7 +180,6 @@ def network_incidence(ell: int, b: int) -> int:
         return +1
     else:
         return 0
-
 
 def supply_incidence(b: int, g: int, o: int) -> bool:
     bus_generator: bool = buses[b, "id"] == generators[g, "bus_id"]
@@ -234,6 +242,9 @@ model.reference_angle = pyo.Constraint(
     expr=model.theta[reference_bus] == 0, doc="reference voltage angle @ bus[0]"
 )
 
+##############################################################################
+# Optimization model inequality constraints
+##############################################################################
 
 def flow_bound_lower_rule(model: Model, ell: int) -> InequalityExpression:
     return -model.line_capacities[ell] <= model.f[ell]
@@ -250,6 +261,9 @@ model.flow_bounds_upper = pyo.Constraint(
     Lines, rule=flow_bound_upper_rule, doc="flow upper bound @ line"
 )
 
+##############################################################################
+# Solve optimization model
+##############################################################################
 
 # Optimization
 def optimize(model, **kwargs) -> float:
@@ -264,7 +278,10 @@ total_cost = optimize(model, tee=True)  # tee output to console
 
 model.dual.pprint()
 
-# Transfer solution to tables
+##############################################################################
+# Extract optimal decision values
+##############################################################################
+
 quantity = [pyo.value(model.p[o]) for o in Offers]
 flow = [pyo.value(model.f[ell]) for ell in Lines]
 angle = [pyo.value(model.theta[b]) for b in Buses]
@@ -273,6 +290,10 @@ flow_marginal_prices = np.add(
     [model.dual[model.flow_bounds_lower[ell]] for ell in Lines],
     [model.dual[model.flow_bounds_upper[ell]] for ell in Lines],
 )
+
+##############################################################################
+# Sanity checks
+##############################################################################
 
 free_bus_ids = [b for b in Buses if b != reference_bus]
 K = line_bus_incidence[:, free_bus_ids]
@@ -292,7 +313,10 @@ assert np.allclose(SF @ injections[free_bus_ids], flow)
 
 SF @ injections[free_bus_ids]
 
+##############################################################################
 # Extend data tables with decision variables
+##############################################################################
+
 offers = offers.with_columns(quantity=pl.Series(quantity))
 lines = lines.with_columns(flow=pl.Series(flow))
 buses = buses.with_columns(
@@ -320,8 +344,10 @@ print("generators -", generators)
 
 load_payment = sum(buses[b, "load"] * load_marginal_prices[b] for b in Buses)
 
-
+##############################################################################
 # Evaluate marginal prices
+##############################################################################
+
 def direct_marginal_price(model, parameter: ParamData, delta=1.0) -> float:
     original = parameter.value
     unperturbed = optimize(model)
@@ -341,8 +367,9 @@ flow_marginal_price_estimates = [
 assert np.allclose(load_marginal_price_estimates, load_marginal_prices)
 assert np.allclose(flow_marginal_price_estimates, flow_marginal_prices)
 
+##############################################################################
 # Helper functions for plotting
-
+##############################################################################
 
 def mapvalues(f, keys, *values) -> dict:
     return dict(zip(keys, map(f, *values)))
@@ -375,7 +402,10 @@ def hybrid_layout(
     return nx.spring_layout(graph, pos=pos, fixed=hubs, k=k, seed=seed, **kwargs)
 
 
+##############################################################################
 # Network definition for plotting
+##############################################################################
+
 network = nx.DiGraph()
 
 # Node defnition
@@ -501,7 +531,9 @@ plt.margins(x=0.2, y=0.2)
 plt.savefig("network.png", dpi=600, bbox_inches="tight")
 plt.show(block=False)
 
-# Path analysis
+##############################################################################
+# Congestion analysis
+##############################################################################
 
 path_rows: list[dict] = []
 path_edge_rows: list[dict] = []
