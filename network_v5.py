@@ -1,5 +1,5 @@
 import math
-from typing import TypeAlias
+from typing import Any, Callable, Iterable, TypeAlias
 import IPython
 import matplotlib.cm as cm
 import matplotlib.colors as mc
@@ -106,9 +106,9 @@ for column in [
 
 Buses = range(buses.height)
 Demands = range(demands.height)
+Generators = range(generators.height)
 Lines = range(lines.height)
 Offers = range(offers.height)
-Generators = range(generators.height)
 
 ##############################################################################
 # Optimization model parameters
@@ -120,11 +120,6 @@ model.loads = pyo.Param(
     initialize={b: buses[b, "load"] for b in Buses},
     mutable=True,
     doc="load (demand) @ bus [MW]",
-)
-model.susceptances = pyo.Param(
-    Lines,
-    initialize={ell: lines[ell, "susceptance"] for ell in Lines},
-    doc="susceptance (1/reactance) @ line [MW/rad]",
 )
 model.line_capacities = pyo.Param(
     Lines,
@@ -180,6 +175,7 @@ def network_incidence(ell: int, b: int) -> int:
         return +1
     else:
         return 0
+
 
 def supply_incidence(b: int, g: int, o: int) -> bool:
     bus_generator: bool = buses[b, "id"] == generators[g, "bus_id"]
@@ -246,6 +242,7 @@ model.reference_angle = pyo.Constraint(
 # Optimization model inequality constraints
 ##############################################################################
 
+
 def flow_bound_lower_rule(model: Model, ell: int) -> InequalityExpression:
     return -model.line_capacities[ell] <= model.f[ell]
 
@@ -264,6 +261,7 @@ model.flow_bounds_upper = pyo.Constraint(
 ##############################################################################
 # Solve optimization model
 ##############################################################################
+
 
 # Optimization
 def optimize(model, **kwargs) -> float:
@@ -311,8 +309,6 @@ assert np.allclose(
 )
 assert np.allclose(SF @ injections[free_bus_ids], flow)
 
-SF @ injections[free_bus_ids]
-
 ##############################################################################
 # Extend data tables with decision variables
 ##############################################################################
@@ -348,6 +344,7 @@ load_payment = sum(buses[b, "load"] * load_marginal_prices[b] for b in Buses)
 # Evaluate marginal prices
 ##############################################################################
 
+
 def direct_marginal_price(model, parameter: ParamData, delta=1.0) -> float:
     original = parameter.value
     unperturbed = optimize(model)
@@ -371,7 +368,10 @@ assert np.allclose(flow_marginal_price_estimates, flow_marginal_prices)
 # Helper functions for plotting
 ##############################################################################
 
-def mapvalues(f, keys, *values) -> dict:
+
+def mapvalues(
+    f: Callable[..., str], keys: Iterable[str], *values: Iterable[Any]
+) -> dict[str, str]:
     return dict(zip(keys, map(f, *values)))
 
 
