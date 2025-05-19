@@ -17,24 +17,27 @@ from pyomo.core.expr.relational_expr import EqualityExpression, InequalityExpres
 
 @dataclasses.dataclass(frozen=True, repr=False, slots=True)
 class Network:
-    demand_load: np.ndarray
+    bus_load: np.ndarray
     line_capacity: np.ndarray
     line_susceptance: np.ndarray
     offer_max_quantity: np.ndarray
     offer_price: np.ndarray
     line_bus_incidence: np.ndarray
-    load_bus_incidence: np.ndarray
     offer_bus_incidence: np.ndarray
     reference_bus: int = 0
 
     def __post_init__(self) -> None:
         """Validate array dimensions."""
-        num_buses = self.line_bus_incidence.shape[1]
         assert len(self.line_capacity) == len(self.line_susceptance)
         assert len(self.offer_max_quantity) == len(self.offer_price)
-        assert self.line_bus_incidence.shape == (len(self.line_capacity), num_buses)
-        assert self.load_bus_incidence.shape == (len(self.demand_load), num_buses)
-        assert self.offer_bus_incidence.shape == (len(self.offer_price), num_buses)
+        assert self.line_bus_incidence.shape == (
+            len(self.line_capacity),
+            len(self.bus_load),
+        )
+        assert self.offer_bus_incidence.shape == (
+            len(self.offer_price),
+            len(self.bus_load),
+        )
 
     @classmethod
     def init(
@@ -44,7 +47,7 @@ class Network:
         generators: pl.DataFrame,
         lines: pl.DataFrame,
         offers: pl.DataFrame,
-        reference_bus: int = 0
+        reference_bus: int = 0,
     ) -> Self:
         """Initialize from dataframes."""
 
@@ -86,19 +89,20 @@ class Network:
             ],
             dtype=float,
         )
+
         load_bus_incidence = np.array(
             [[load_incidence(d, b) for b in bus_indices] for d in demand_indices],
             dtype=float,
         )
+        demand_loads = demands[:, "load"].to_numpy()
 
         return cls(
-            demand_load=demands[:, "load"].to_numpy(),
+            bus_load=demand_loads @ -load_bus_incidence,
             line_capacity=lines[:, "capacity"].to_numpy(),
             line_susceptance=lines[:, "susceptance"].to_numpy(),
             offer_max_quantity=offers[:, "max_quantity"].to_numpy(),
             offer_price=offers[:, "price"].to_numpy(),
             line_bus_incidence=line_bus_incidence,
-            load_bus_incidence=load_bus_incidence,
             offer_bus_incidence=offer_bus_incidence,
         )
 
