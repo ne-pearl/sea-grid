@@ -5,6 +5,31 @@ import numpy as np
 from numpy.typing import NDArray
 import polars as pl
 
+# Units of measure
+Id = pl.String
+MW = pl.Float64
+MWPerRad = pl.Float64
+USDPerMWh = pl.Float64
+
+buses_input_schema = {"id": Id}
+generators_input_schema = {"id": Id, "bus_id": Id}
+lines_input_schema = {
+    "from_bus_id": Id,
+    "to_bus_id": Id,
+    "capacity": MW,
+    "susceptance": MWPerRad,
+}
+offers_input_schema = {
+    "generator_id": Id,
+    "max_quantity": MW,
+    "price": USDPerMWh,
+}
+
+
+def validate(dataframe: pl.DataFrame, schema: dict) -> bool:
+    """Validate the schema of a DataFrame."""
+    return schema.items() <= dataframe.schema.items()
+
 
 @dataclasses.dataclass(frozen=True, repr=False, slots=True)
 class Serialization:
@@ -77,6 +102,11 @@ class Data(Serialization):
     ) -> Self:
         """Initialize from dataframes."""
 
+        assert validate(buses, buses_input_schema)
+        assert validate(generators, generators_input_schema)
+        assert validate(lines, lines_input_schema)
+        assert validate(offers, offers_input_schema)
+
         bus_indices = range(buses.height)
         demand_indices = range(demands.height)
         generator_indices = range(generators.height)
@@ -147,3 +177,21 @@ class Result(Generic[Model], Serialization):
     energy_price: Optional[NDArray[np.float64]] = None
     congestion_price: Optional[NDArray[np.float64]] = None
     loss_price: Optional[NDArray[np.float64]] = None
+
+
+def enumerate_over(df: pl.DataFrame, over: str, alias: str = "id") -> pl.DataFrame:
+    """Creates a new key by"""
+
+    # Generate a temporary column name that doesn't conflict with existing columns
+    longest: str = max(df.columns, key=len, default="")
+    temporary: str = longest + "_temporary"
+
+    # Add a temporary column that enumerates rows within each group
+    df = df.with_columns(pl.arange(0, pl.len()).over(over).alias(temporary))
+
+    # Create the new identifier by combining the group key and the enumeration
+    df = df.with_columns(
+        pl.format("{}/{}", pl.col(over), pl.col(temporary) + 1).alias(alias)
+    )
+
+    return df.drop(temporary)
