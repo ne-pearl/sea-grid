@@ -49,6 +49,11 @@ data = Data.init(
 )
 result: Result = formulate(data)
 
+assert np.isclose(
+    result.total_cost,
+    np.dot(result.dispatch_quantity @ data.offer_bus_incidence, result.energy_price),
+)
+
 energy_price = [
     marginal_price(result.model, constraint)
     for constraint in result.model.loads.values()

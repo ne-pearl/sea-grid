@@ -373,6 +373,68 @@ assert np.allclose(flow_marginal_price_estimates, flow_marginal_prices)
 ##############################################################################
 
 
+def hybrid_layout(graph: nx.Graph, scale: float = 1.0, seed: int = 0, **kwargs) -> dict:
+    """
+    This hybrid layout seems to produce better outcome than the pure layouts provided by networkx.
+    """
+    # Work-around: spring_layout allows orientation to influence layout in evil ways
+    assert not graph.is_directed()
+    hubs = [n for n in graph.nodes if graph.degree(n) > 1]
+    pos = nx.kamada_kawai_layout(graph.subgraph(hubs), scale=scale)
+    for hub in hubs:
+        satellites = {*graph.neighbors(hub)}.difference(hubs)
+        satpos = nx.circular_layout(
+            graph.subgraph(satellites),
+            center=pos[hub],
+            scale=scale,
+        )
+        pos.update(satpos)
+    assert len(pos) == graph.number_of_nodes()
+    return nx.spring_layout(graph, pos=pos, fixed=hubs, k=scale, seed=seed, **kwargs)
+
+
+def draw_nodes(nodelist, font_color="black", **kwargs):
+    global network, pos, font_size
+    nx.draw_networkx_nodes(network, pos, nodelist=nodelist, **kwargs)
+    nx.draw_networkx_labels(
+        network,
+        pos,
+        labels={id: id for id in nodelist},
+        font_size=font_size,
+        font_color=font_color,
+    )
+
+
+# def draw_edges(tag: str, font_color):
+#     global network, pos, font_size
+#     edgelist, edge_color = zip(
+#         *(
+#             ((tail, head), attrib["utilization"])
+#             for (tail, head, attrib) in network.edges(data=True)
+#             if attrib["tag"] == tag
+#         )
+#     )
+#     nx.draw_networkx_edges(
+#         network,
+#         pos,
+#         edgelist=edgelist,
+#         edge_color=edge_color,
+#         edge_cmap=cm.coolwarm,
+#         edge_vmin=0.0,
+#         edge_vmax=100.0,
+#     )
+#    edge_labels = edge_annotations(
+#         lines, "from_bus_id", "to_bus_id", "{:.0f}MW\n{:.0f}%", "flow", "utilization",
+#     )
+#     nx.draw_networkx_edge_labels(
+#         network,
+#         pos,
+#         edge_labels=edge_labels,
+#         font_size=font_size,
+#         font_color="blue",
+#     )
+
+
 def node_annotations(
     df: pl.DataFrame, key: str, template: str, *value: str
 ) -> dict[str, str]:
@@ -391,126 +453,95 @@ def edge_annotations(
     return dict(zip(keys, values))
 
 
-def hybrid_layout(
-    graph: nx.Graph,
-    hub_scale: float = 1.0,
-    satellite_scale: float = 1.0,
-    k: float = 0.4,
-    seed: int = 0,
-    **kwargs,
-) -> dict:
-    """
-    This hybrid layout seems to produce better outcome than the pure layouts provided by networkx.
-    """
-    # Work-around: spring_layout allows orientation to influence layout in evil ways
-    assert not graph.is_directed()
-    hubs = [n for n in graph.nodes if graph.degree(n) > 1]
-    pos = nx.kamada_kawai_layout(graph.subgraph(hubs), scale=hub_scale)
-    for hub in hubs:
-        satellites = {*graph.neighbors(hub)}.difference(hubs)
-        satpos = nx.circular_layout(
-            graph.subgraph(satellites),
-            center=pos[hub],
-            scale=satellite_scale,
-        )
-        pos.update(satpos)
-    assert len(pos) == graph.number_of_nodes()
-    return nx.spring_layout(graph, pos=pos, fixed=hubs, k=k, seed=seed, **kwargs)
-
-
 # Network definition for plotting
 network = nx.DiGraph()
-
-# Node defnition
-bus_price_labels = node_annotations(buses, "id", "${:.2f}/MWh", "price")
-offer_price_labels = node_annotations(
-    offers, "id", "≤{:}MW\n@ ${:}/MWh", "max_quantity", "price"
-)
-demand_labels = node_annotations(demands, "id", "{:}MW", "load")
-
-load_norm = mc.Normalize(vmin=min(buses["load"]), vmax=max(buses["load"]))
-load_cmap = cm.coolwarm  # coolwarm | inferno | magma | plasma etc.
-bus_colors = [load_cmap(load_norm(load)) for load in buses["load"]]
-bus_colors = ["lightblue" for load in buses["load"]]
-
-generator_cmap = plt.get_cmap(name="tab10", lut=generators.height)
-generator_colors = {
-    gid: mc.to_hex(generator_cmap(i)) for i, gid in enumerate(generators["id"])
-}
-offer_colors = [generator_colors[gid] for gid in offers["generator_id"]]
-demand_colors = ["red" for demand in demands["id"]]
 
 network.add_nodes_from(buses["id"])
 network.add_nodes_from(offers["id"])
 network.add_nodes_from(demands["id"])
 
-# Edge definition
-flow_labels = edge_annotations(
-    lines,
-    "from_bus_id",
-    "to_bus_id",
-    "{:.0f}MW/\n{:.0f}%",
-    "flow",
-    "utilization",
+line_edges = list(zip(lines[:, "from_bus_id"], lines[:, "to_bus_id"]))
+line_utilization = lines[:, "utilization"].to_list()
+
+offer_edges = list(zip(offers[:, "id"], offers[:, "bus_id"]))
+offer_utilization = offers[:, "utilization"].to_list()
+
+demand_edges = list(zip(demands[:, "bus_id"], demands[:, "id"]))
+
+network.add_weighted_edges_from(
+    zip(*zip(*line_edges), line_utilization),
+    weight="utilization",
+    tag="lines",
 )
-supply_labels = edge_annotations(
-    offers,
-    "id",
-    "bus_id",
-    "{:.0f}MW",
-    "quantity",
+network.add_weighted_edges_from(
+    zip(*zip(*offer_edges), offer_utilization),
+    weight="utilization",
+    tag="offers",
 )
-
-
-def add_edges(network, df, tail_key, head_key, color_key) -> None:
-    for tail, head, color in zip(df[:, tail_key], df[:, head_key], df[:, color_key]):
-        network.add_edge(tail, head, color=color)
-
-
-add_edges(network, lines, "from_bus_id", "to_bus_id", "utilization")
-add_edges(network, offers, "id", "bus_id", "utilization")
-add_edges(network, demands, "bus_id", "id", "utilization")
+network.add_edges_from(demand_edges, utilization=1.0, tag="demands")
 
 # Network layout
-scale = 1.5  # 50.0
-pos: dict = hybrid_layout(
-    network.to_undirected(), hub_scale=scale, satellite_scale=scale, k=scale
-)
+scale = 2.0
+pos: dict = hybrid_layout(network.to_undirected(), scale=scale)
 
-alpha = 0.9
-plt.figure(figsize=(15*alpha, 9*alpha), dpi=150)
-# plt.figure(figsize=(15, 9), dpi=80)
+plt.figure(figsize=np.array([15, 9]) * 0.9, dpi=150)
 plt.axis("equal")
-
-
 font_size = 8
 
+bus_load_norm = mc.Normalize(vmin=min(buses["load"]), vmax=max(buses["load"]))
+bus_load_cmap = cm.coolwarm  # coolwarm | inferno | magma | plasma etc.
+draw_nodes(
+    buses["id"],
+    node_color=[bus_load_cmap(bus_load_norm(load)) for load in buses["load"]],
+    node_shape="s",
+)
 
-def draw_nodes(nodelist, font_color="black", **kwargs):
-    nx.draw_networkx_nodes(network, pos, nodelist=nodelist, **kwargs)
-    nx.draw_networkx_labels(
-        network,
-        pos,
-        labels={id: id for id in nodelist},
-        font_size=font_size,
-        font_color=font_color,
-    )
+generator_cmap = plt.get_cmap(name="tab10", lut=generators.height)
+generator_colors = {
+    gid: mc.to_hex(generator_cmap(i)) for i, gid in enumerate(generators["id"])
+}
+draw_nodes(
+    offers["id"],
+    node_color=[generator_colors[gid] for gid in offers["generator_id"]],
+    node_shape="o",
+)
+draw_nodes(
+    demands["id"],
+    node_color=["red" for demand in demands["id"]],
+    node_shape="^",
+)
 
-
-# Network annotation
-draw_nodes(buses["id"], node_color=bus_colors, node_shape="s")
-draw_nodes(offers["id"], node_color=offer_colors, node_shape="o")
-draw_nodes(demands["id"], node_color=demand_colors, node_shape="^")
+bus_price_node_labels = node_annotations(buses, "id", "${:.2f}/MWh", "price")
+offer_price_node_labels = node_annotations(
+    offers, "id", "≤{:}MW\n@ ${:}/MWh", "max_quantity", "price"
+)
+demand_node_labels = node_annotations(demands, "id", "{:}MW", "load")
+offset_pos = {id: xy + [0, -0.3 * scale] for id, xy in pos.items()}
 nx.draw_networkx_labels(
     network,
-    {id: xy + [0, -0.3 * scale] for id, xy in pos.items()},
-    labels=bus_price_labels | offer_price_labels | demand_labels,
+    offset_pos,
+    labels=bus_price_node_labels,
     font_size=font_size,
+    font_color="red",
+)
+nx.draw_networkx_labels(
+    network,
+    offset_pos,
+    labels=offer_price_node_labels,
+    font_size=font_size,
+    font_color="black",
+)
+nx.draw_networkx_labels(
+    network,
+    offset_pos,
+    labels=demand_node_labels,
+    font_size=font_size,
+    font_color="black",
 )
 
 # NetworkX does not preserve edge insertion order, so reconstruct a consistent ordering
 edgelist, edge_color = zip(
-    *((vertices, a["color"]) for (*vertices, a) in network.edges(data=True))
+    *((vertices, a["utilization"]) for (*vertices, a) in network.edges(data=True))
 )
 
 nx.draw_networkx_edges(
@@ -522,13 +553,35 @@ nx.draw_networkx_edges(
     edge_vmin=0.0,
     edge_vmax=100.0,
 )
-nx.draw_networkx_edge_labels(
-    network,
-    pos,
-    edge_labels=flow_labels | supply_labels,
-    font_size=font_size,
-    font_color="blue",
+
+flow_edge_labels = edge_annotations(
+    lines, "from_bus_id", "to_bus_id", "{:.0f}MW\n{:.0f}%", "flow", "utilization"
 )
+supply_edge_labels = edge_annotations(offers, "id", "bus_id", "{:.0f}MW", "quantity")
+edge_labels = flow_edge_labels | supply_edge_labels
+utilization = nx.get_edge_attributes(network, "utilization")
+
+
+def draw_edge_labels(selected: Callable[[float], bool], font_color: str) -> dict:
+    global edge_labels, network, pos, utilization
+    nx.draw_networkx_edge_labels(
+        network,
+        pos,
+        edge_labels={
+            key: value
+            for key, value in edge_labels.items()
+            if selected(utilization[*key])
+        },
+        font_color=font_color,
+        font_size=font_size,
+    )
+
+
+epsilon = 1.0  # [%]
+draw_edge_labels(lambda percent: 0.0 <= percent < epsilon, "black")
+draw_edge_labels(lambda percent: epsilon <= percent < 100.0 - epsilon, "blue")
+draw_edge_labels(lambda percent: 100.0 - epsilon <= percent, "red")
+
 
 # Display network
 plt.title(
