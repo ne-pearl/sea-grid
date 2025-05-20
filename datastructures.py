@@ -98,7 +98,7 @@ class Data(Serialization):
         generators: pl.DataFrame,
         lines: pl.DataFrame,
         offers: pl.DataFrame,
-        reference_bus: int = 0,
+        reference_bus: str,
     ) -> Self:
         """Initialize from dataframes."""
 
@@ -160,7 +160,7 @@ class Data(Serialization):
             offer_price=offers[:, "price"].to_numpy(),
             line_bus_incidence=line_bus_incidence,
             offer_bus_incidence=offer_bus_incidence,
-            reference_bus=reference_bus,
+            reference_bus=buses["id"].index_of(reference_bus),
         )
 
 

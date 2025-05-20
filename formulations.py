@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import pyomo.environ as pyo
 from pyomo.core import Model
@@ -29,7 +28,7 @@ def formulate(
     offer_indices = range(data.offer_bus_incidence.shape[0])
 
     # Parameters for pricing
-    model.loads = pyo.Param(
+    model.bus_loads = pyo.Param(
         bus_indices,
         initialize={b: data.bus_load[b] for b in bus_indices},
         mutable=True,
@@ -49,6 +48,8 @@ def formulate(
     model.p = pyo.Var(offer_indices, bounds=supply_bounds, doc="dispatch @ offer [MW]")
     model.f = pyo.Var(line_indices, doc="power flow @ line [MW]")
     model.theta = pyo.Var(bus_indices, doc="voltage angle @ bus [rad]")
+
+    # For objective sentivity to constraint parameters
     model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
     # Objective function
@@ -70,17 +71,14 @@ def formulate(
                 for ell in line_indices
                 if (sign := data.line_bus_incidence[ell, b]) != 0
             )
-            == model.loads[b]
+            == model.bus_loads[b]
         )
 
     def flow_rule(model: Model, ell: int) -> EqualityExpression:
-        return (
-            sum(
-                sign * model.theta[b] * data.line_susceptance[ell]
-                for b in bus_indices
-                if (sign := data.line_bus_incidence[ell, b]) != 0
-            )
-            == model.f[ell]
+        return model.f[ell] == sum(
+            sign * model.theta[b] * data.line_susceptance[ell]
+            for b in bus_indices
+            if (sign := data.line_bus_incidence[ell, b]) != 0
         )
 
     # Equality constraints
