@@ -393,48 +393,6 @@ def hybrid_layout(graph: nx.Graph, scale: float = 1.0, seed: int = 0, **kwargs) 
     return nx.spring_layout(graph, pos=pos, fixed=hubs, k=scale, seed=seed, **kwargs)
 
 
-def draw_nodes(nodelist, font_color="black", **kwargs):
-    global network, pos, font_size
-    nx.draw_networkx_nodes(network, pos, nodelist=nodelist, **kwargs)
-    nx.draw_networkx_labels(
-        network,
-        pos,
-        labels={id: id for id in nodelist},
-        font_size=font_size,
-        font_color=font_color,
-    )
-
-
-# def draw_edges(tag: str, font_color):
-#     global network, pos, font_size
-#     edgelist, edge_color = zip(
-#         *(
-#             ((tail, head), attrib["utilization"])
-#             for (tail, head, attrib) in network.edges(data=True)
-#             if attrib["tag"] == tag
-#         )
-#     )
-#     nx.draw_networkx_edges(
-#         network,
-#         pos,
-#         edgelist=edgelist,
-#         edge_color=edge_color,
-#         edge_cmap=cm.coolwarm,
-#         edge_vmin=0.0,
-#         edge_vmax=100.0,
-#     )
-#    edge_labels = edge_annotations(
-#         lines, "from_bus_id", "to_bus_id", "{:.0f}MW\n{:.0f}%", "flow", "utilization",
-#     )
-#     nx.draw_networkx_edge_labels(
-#         network,
-#         pos,
-#         edge_labels=edge_labels,
-#         font_size=font_size,
-#         font_color="blue",
-#     )
-
-
 def node_annotations(
     df: pl.DataFrame, key: str, template: str, *value: str
 ) -> dict[str, str]:
@@ -488,6 +446,39 @@ plt.figure(figsize=np.array([15, 9]) * 0.9, dpi=150)
 plt.axis("equal")
 font_size = 8
 
+
+def draw_nodes(nodelist, font_color="black", **kwargs):
+    global network, pos, font_size
+    nx.draw_networkx_nodes(network, pos, nodelist=nodelist, **kwargs)
+    nx.draw_networkx_labels(
+        network,
+        pos,
+        labels={id: id for id in nodelist},
+        font_size=font_size,
+        font_color=font_color,
+    )
+
+
+def draw_edge_labels(
+    selected: Callable[[float], bool],
+    edge_labels: dict,
+    utilization: dict,
+    font_color: str,
+) -> dict:
+    global network, pos, font_size
+    nx.draw_networkx_edge_labels(
+        network,
+        pos,
+        edge_labels={
+            key: value
+            for key, value in edge_labels.items()
+            if selected(utilization[*key])
+        },
+        font_color=font_color,
+        font_size=font_size,
+    )
+
+
 bus_load_norm = mc.Normalize(vmin=min(buses["load"]), vmax=max(buses["load"]))
 bus_load_cmap = cm.coolwarm  # coolwarm | inferno | magma | plasma etc.
 draw_nodes(
@@ -507,7 +498,7 @@ draw_nodes(
 )
 draw_nodes(
     demands["id"],
-    node_color=["red" for demand in demands["id"]],
+    node_color="lightblue",
     node_shape="^",
 )
 
@@ -522,7 +513,7 @@ nx.draw_networkx_labels(
     offset_pos,
     labels=bus_price_node_labels,
     font_size=font_size,
-    font_color="red",
+    font_color="darkgreen",
 )
 nx.draw_networkx_labels(
     network,
@@ -540,15 +531,13 @@ nx.draw_networkx_labels(
 )
 
 # NetworkX does not preserve edge insertion order, so reconstruct a consistent ordering
-edgelist, edge_color = zip(
-    *((vertices, a["utilization"]) for (*vertices, a) in network.edges(data=True))
-)
+utilization = nx.get_edge_attributes(network, "utilization")
 
 nx.draw_networkx_edges(
     network,
     pos,
-    edgelist=edgelist,
-    edge_color=edge_color,
+    edgelist=utilization.keys(),
+    edge_color=utilization.values(),
     edge_cmap=cm.coolwarm,
     edge_vmin=0.0,
     edge_vmax=100.0,
@@ -559,28 +548,27 @@ flow_edge_labels = edge_annotations(
 )
 supply_edge_labels = edge_annotations(offers, "id", "bus_id", "{:.0f}MW", "quantity")
 edge_labels = flow_edge_labels | supply_edge_labels
-utilization = nx.get_edge_attributes(network, "utilization")
-
-
-def draw_edge_labels(selected: Callable[[float], bool], font_color: str) -> dict:
-    global edge_labels, network, pos, utilization
-    nx.draw_networkx_edge_labels(
-        network,
-        pos,
-        edge_labels={
-            key: value
-            for key, value in edge_labels.items()
-            if selected(utilization[*key])
-        },
-        font_color=font_color,
-        font_size=font_size,
-    )
 
 
 epsilon = 1.0  # [%]
-draw_edge_labels(lambda percent: 0.0 <= percent < epsilon, "black")
-draw_edge_labels(lambda percent: epsilon <= percent < 100.0 - epsilon, "blue")
-draw_edge_labels(lambda percent: 100.0 - epsilon <= percent, "red")
+draw_edge_labels(
+    lambda percent: 0.0 <= percent < epsilon,
+    edge_labels=edge_labels,
+    utilization=utilization,
+    font_color="black",
+)
+draw_edge_labels(
+    lambda percent: epsilon <= percent <= 100.0 - epsilon,
+    edge_labels=edge_labels,
+    utilization=utilization,
+    font_color="blue",
+)
+draw_edge_labels(
+    lambda percent: 100.0 - epsilon < percent,
+    edge_labels=edge_labels,
+    utilization=utilization,
+    font_color="red",
+)
 
 
 # Display network
