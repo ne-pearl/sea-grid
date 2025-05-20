@@ -1,6 +1,6 @@
 import dataclasses
 import textwrap
-from typing import Callable, Generic, Optional, Self, TypeVar
+from typing import Any, Callable, Generic, Optional, Self, TypeVar
 import numpy as np
 from numpy.typing import NDArray
 import polars as pl
@@ -195,34 +195,3 @@ def enumerate_over(df: pl.DataFrame, over: str, alias: str = "id") -> pl.DataFra
     )
 
     return df.drop(temporary)
-
-
-# def augment(data: Data, result: Result) -> Data:
-#     return Data(
-#         # fmt: off
-#         offers = (
-#             data.offers.with_columns(pl.Series(result.dispatch_quantity).alias("quantity"))
-#             # utilization of each offer
-#             .with_columns(
-#                 (pl.col("quantity") / pl.col("max_quantity")).alias("utilization")
-#             )
-#             # Add bus identifier to offers table from generators table
-#             .join(
-#                 data.generators[:, ("id", "bus_id")],
-#                 left_on="generator_id",
-#                 right_on="id",
-#                 how="left",
-#             )
-#         )
-#         lines = (
-#             data.lines
-#             .with_columns(pl.Series(result.line_flow).alias("flow"))
-#             .with_columns((pl.col("flow").abs() / pl.col("capacity")).alias("utilization"))
-#         )
-#         buses = data.buses.with_columns(
-#             angle_deg=pl.Series(np.rad2deg(result.voltage_angle)),
-#             price=pl.Series(result.energy_price),
-#             quantity=pl.Series(result.dispatch_quantity @ data.offer_bus_incidence),
-#         )
-#         # fmt: on
-#     )

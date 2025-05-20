@@ -1,8 +1,9 @@
 import random
 import numpy as np
-import polars as pl
+from polars import DataFrame
 from datastructures import Data, Result
-from formulations import formulate, marginal_price
+from formulations_pyomo import formulate, marginal_price
+from plotting import plot
 
 # Set random seed for reproducibility of networkx graph layouts
 random.seed(0)
@@ -10,26 +11,26 @@ np.random.seed(0)
 
 # System data
 tables = dict(
-    buses=pl.DataFrame(
+    buses=DataFrame(
         {
             "id": ["B1", "B2", "B3"],
         },
     ),
     reference_bus="B1",
-    demands=pl.DataFrame(
+    demands=DataFrame(
         {
             "id": ["D1", "D2"],
             "bus_id": ["B3", "B3"],
             "load": [100.0, 50.0],
         }
     ),
-    generators=pl.DataFrame(
+    generators=DataFrame(
         {
             "id": ["G1", "G2", "G3"],
             "bus_id": ["B1", "B2", "B1"],
         }
     ),
-    lines=pl.DataFrame(
+    lines=DataFrame(
         {
             "from_bus_id": ["B1", "B1", "B2"],
             "to_bus_id": ["B2", "B3", "B3"],
@@ -37,7 +38,7 @@ tables = dict(
             "susceptance": [1000.0, 1000.0, 1000.0],
         }
     ),
-    offers=pl.DataFrame(
+    offers=DataFrame(
         {
             "generator_id": ["G1", "G2", "G3", "G1", "G2", "G3"],
             "max_quantity": [200.0, 200.0, 200.0, 100.0, 100.0, 100.0],
@@ -48,8 +49,9 @@ tables = dict(
 
 data = Data.init(**tables)
 result: Result = formulate(data)
-model = result.model
+plot(data=data, result=result, **tables)
 
+model = result.model
 assert np.isclose(
     result.total_cost,
     np.dot(result.dispatch_quantity @ data.offer_bus_incidence, result.energy_price),
