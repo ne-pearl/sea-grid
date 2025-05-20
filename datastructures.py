@@ -152,6 +152,9 @@ class Data(Serialization):
         )
         demand_loads = demands[:, "load"].to_numpy()
 
+        reference_bus_index = buses["id"].index_of(reference_bus)
+        assert reference_bus_index is not None
+
         return cls(
             bus_load=demand_loads @ -load_bus_incidence,
             line_capacity=lines[:, "capacity"].to_numpy(),
@@ -160,7 +163,7 @@ class Data(Serialization):
             offer_price=offers[:, "price"].to_numpy(),
             line_bus_incidence=line_bus_incidence,
             offer_bus_incidence=offer_bus_incidence,
-            reference_bus=buses["id"].index_of(reference_bus),
+            reference_bus=reference_bus_index,
         )
 
 

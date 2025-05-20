@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 import matplotlib.cm as cm
 import matplotlib.colors as mc
 import matplotlib.pyplot as plt
@@ -6,26 +6,6 @@ import networkx as nx
 import numpy as np
 import polars as pl
 from datastructures import Data, Result
-
-
-def hybrid_layout(graph: nx.Graph, scale: float = 1.0, seed: int = 0, **kwargs) -> dict:
-    """
-    This hybrid layout seems to produce better outcome than the pure layouts provided by networkx.
-    """
-    # Work-around: spring_layout allows orientation to influence layout in evil ways
-    assert not graph.is_directed()
-    hubs = [n for n in graph.nodes if graph.degree(n) > 1]
-    pos = nx.kamada_kawai_layout(graph.subgraph(hubs), scale=scale)
-    for hub in hubs:
-        satellites = {*graph.neighbors(hub)}.difference(hubs)
-        satpos = nx.circular_layout(
-            graph.subgraph(satellites),
-            center=pos[hub],
-            scale=scale,
-        )
-        pos.update(satpos)
-    assert len(pos) == graph.number_of_nodes()
-    return nx.spring_layout(graph, pos=pos, fixed=hubs, k=scale, seed=seed, **kwargs)
 
 
 def node_annotations(
@@ -52,6 +32,9 @@ def plot_tables(
     generators: pl.DataFrame,
     offers: pl.DataFrame,
     demands: pl.DataFrame,
+    k: float,
+    scale: float,
+    iterations: int,
     **_,
 ) -> None:
     """Plot the problem data, dispatch instructions, and prices."""
@@ -83,8 +66,9 @@ def plot_tables(
     network.add_edges_from(demand_edges, utilization=1.0, tag="demands")
 
     # Network layout
-    scale = 2.0
-    pos: dict = hybrid_layout(network.to_undirected(), scale=scale)
+    pos: dict = nx.spring_layout(
+        network.to_undirected(), iterations=iterations, k=k, scale=scale
+    )
 
     plt.figure(figsize=np.array([15, 9]) * 0.9, dpi=150)
     plt.axis("equal")
@@ -148,7 +132,7 @@ def plot_tables(
         offers, "id", "≤{:}MW\n@ ${:}/MWh", "max_quantity", "price"
     )
     demand_node_labels = node_annotations(demands, "id", "{:}MW", "load")
-    offset_pos = {id: xy + [0, -0.3 * scale] for id, xy in pos.items()}
+    offset_pos = {id: xy + [0, -0.12 * scale] for id, xy in pos.items()}
     nx.draw_networkx_labels(
         network,
         offset_pos,
@@ -276,6 +260,13 @@ def augment(
     )
 
 
-def plot(data: Data, result: Result, **tables):
+def plot(
+    data: Data,
+    result: Result,
+    k: Optional[float] = None,
+    iterations: int = 10000,
+    scale: float = 1.0,
+    **tables,
+):
     augmented: dict[str, Any] = augment(data=data, result=result, **tables)
-    plot_tables(**augmented)
+    plot_tables(**augmented, k=k, iterations=iterations, scale=scale)
