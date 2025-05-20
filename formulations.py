@@ -2,20 +2,21 @@ import math
 import numpy as np
 import pyomo.environ as pyo
 from pyomo.core import Model
+from pyomo.core.base.param import ParamData
 from pyomo.core.expr.relational_expr import EqualityExpression, InequalityExpression
 from datastructures import Data, Result
 
 
-def objective_value(solver, model, **kwargs) -> float:
+def optimize(model, **kwargs) -> float:
     """Solve the optimization problem encoded in model and return the objective value."""
+    solver = pyo.SolverFactory("highs")
     results = solver.solve(model, **kwargs)
     assert results.solver.termination_condition is pyo.TerminationCondition.optimal
-    return pyo.value(model.total_cost)
+    return pyo.value(model.objective)
 
 
 def formulate(
     data: Data,
-    solver_name: str = "highs",
     tee: bool = False,
 ) -> Result:
     """Formulate the optimization problem for the given power system data."""
@@ -51,7 +52,7 @@ def formulate(
     model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
     # Objective function
-    model.total_cost = pyo.Objective(
+    model.objective = pyo.Objective(
         expr=sum(data.offer_price[o] * model.p[o] for o in offer_indices),
         sense=pyo.minimize,
         doc="total operating cost [$/h]",
@@ -109,8 +110,7 @@ def formulate(
     )
 
     # Solve optimization model
-    solver = pyo.SolverFactory(solver_name)
-    total_cost = objective_value(solver, model, tee=tee)
+    total_cost = optimize(model, tee=tee)
 
     # Extract optimal decision values
     return Result(
@@ -128,3 +128,12 @@ def formulate(
             ]
         ),
     )
+
+
+def marginal_price(model, parameter: ParamData, delta=1.0) -> float:
+    original = parameter.value
+    unperturbed = optimize(model)
+    parameter.value += delta
+    perturbed = optimize(model)
+    parameter.value = original  # restore
+    return (perturbed - unperturbed) / delta
