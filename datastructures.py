@@ -1,6 +1,7 @@
 import dataclasses
+import pathlib
 import textwrap
-from typing import Any, Callable, Generic, Optional, Self, TypeVar
+from typing import Any, Callable, Generic, Optional, Self, TypeVar, Union
 import numpy as np
 from numpy.typing import NDArray
 import polars as pl
@@ -185,3 +186,15 @@ def enumerate_over(df: pl.DataFrame, over: str, alias: str = "id") -> pl.DataFra
     )
 
     return df.drop(temporary)
+
+
+def load(folder: Union[pathlib.Path, str]) -> dict[str, pl.DataFrame]:
+    folder = pathlib.Path(folder)
+    buses = pl.read_csv(folder / "buses.csv").sort(by=["id"])
+    return dict(
+        buses=buses,
+        reference_bus=buses[0, "id"],
+        generators=pl.read_csv(folder / "generators.csv").sort(by=["id"]),
+        lines=pl.read_csv(folder / "lines.csv").sort(by=["from_bus_id", "to_bus_id"]),
+        offers=pl.read_csv(folder / "offers.csv").sort(by=["generator_id", "price"]),
+    )

@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from polars import DataFrame
 from datastructures import Data, Result
-from formulations_pyomo import formulate, marginal_price
+from formulations import formulate, marginal_price
 from plotting import plot
 
 # Set random seed for reproducibility of networkx graph layouts
