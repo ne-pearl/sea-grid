@@ -7,19 +7,20 @@ import polars as pl
 
 # Units of measure
 Id = pl.String
+Mile = pl.Float64
 MW = pl.Float64
 MWPerRad = pl.Float64
 USDPerMWh = pl.Float64
 
-buses_input_schema = {"id": Id, "load": MW}
-generators_input_schema = {"id": Id, "bus_id": Id}
-lines_input_schema = {
+buses_schema = {"id": Id, "load": MW, "x": Mile, "y": Mile}
+generators_schema = {"id": Id, "bus_id": Id}
+lines_schema = {
     "from_bus_id": Id,
     "to_bus_id": Id,
     "capacity": MW,
     "susceptance": MWPerRad,
 }
-offers_input_schema = {
+offers_schema = {
     "generator_id": Id,
     "max_quantity": MW,
     "price": USDPerMWh,
@@ -101,10 +102,10 @@ class Data(Serialization):
     ) -> Self:
         """Initialize from dataframes."""
 
-        assert validate(buses, buses_input_schema)
-        assert validate(generators, generators_input_schema)
-        assert validate(lines, lines_input_schema)
-        assert validate(offers, offers_input_schema)
+        assert validate(buses, buses_schema)
+        assert validate(generators, generators_schema)
+        assert validate(lines, lines_schema)
+        assert validate(offers, offers_schema)
 
         bus_indices = range(buses.height)
         generator_indices = range(generators.height)

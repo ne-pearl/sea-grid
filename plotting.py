@@ -1,4 +1,4 @@
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 import matplotlib.cm as cm
 import matplotlib.colors as mc
 import matplotlib.pyplot as plt
@@ -7,6 +7,13 @@ import networkx as nx
 import numpy as np
 import polars as pl
 from datastructures import Data, Result
+
+
+def normalize(xy: np.ndarray, scale_x: float = 1.0, scale_y: float = 1.0) -> np.ndarray:
+    assert xy.ndim == 2 and xy.shape[1] == 2
+    centered = xy - np.median(xy, axis=0)
+    normalized = centered / np.max(np.abs(centered))
+    return normalized * np.array([scale_x, scale_y])
 
 
 def augment(
@@ -55,33 +62,6 @@ def augment(
     )
 
 
-def hybrid_layout(
-    graph: nx.Graph,
-    scale: float = 1.0,
-    kscale: float = 1.0,
-    seed: int = 0,
-    **kwargs,
-) -> dict:
-    """
-    This hybrid layout seems to produce better outcome than the pure layouts provided by networkx.
-    """
-    # Work-around: spring_layout allows orientation to influence layout in evil ways
-    assert not graph.is_directed()
-    hubs = [n for n in graph.nodes if graph.degree(n) > 1]
-    pos = nx.kamada_kawai_layout(graph.subgraph(hubs), scale=scale)
-    for hub in hubs:
-        satellites = {*graph.neighbors(hub)}.difference(hubs)
-        satpos = nx.circular_layout(
-            graph.subgraph(satellites),
-            center=pos[hub],
-            scale=scale,
-        )
-        pos.update(satpos)
-    assert len(pos) == graph.number_of_nodes()
-    k = kscale / np.sqrt(len(graph))
-    return nx.spring_layout(graph, pos=pos, fixed=hubs, k=k, seed=seed, **kwargs)
-
-
 def node_annotations(
     df: pl.DataFrame, key: str, template: str, *value: str
 ) -> dict[str, str]:
@@ -105,10 +85,9 @@ def plot_tables(
     lines: pl.DataFrame,
     generators: pl.DataFrame,
     offers: pl.DataFrame,
-    kscale: float,
-    dy: int = -2,  # [points]
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
     font_size: int = 8,  # [points]
-    iterations: int = 50000,
     **_,
 ) -> None:
     """Plot the problem data, dispatch instructions, and prices."""
@@ -116,7 +95,13 @@ def plot_tables(
     # Network definition for plotting
     network = nx.DiGraph()
 
-    network.add_nodes_from(buses["id"])
+    network.add_nodes_from(
+        (
+            # NB: swapped x & y to account for figure coordinate axes
+            (id, dict(position=np.array([x, y])))
+            for (id, x, y) in zip(buses["id"], buses["x"], buses["y"])
+        )
+    )
     network.add_nodes_from(offers["id"])
 
     line_edges = list(zip(lines[:, "from_bus_id"], lines[:, "to_bus_id"]))
@@ -135,10 +120,12 @@ def plot_tables(
         tag="offers",
     )
 
-    # Network layout
-    pos: dict = hybrid_layout(
-        network.to_undirected(), iterations=iterations, kscale=kscale
-    )
+    # Determine node positions
+    pos: dict = nx.nx_agraph.graphviz_layout(network.to_undirected())
+
+    # Scale coordinates to properly fill the figure
+    xy = np.vstack(tuple(pos.values()))
+    pos = dict(zip(pos.keys(), normalize(xy, scale_x, scale_y)))
 
     fig, ax = plt.subplots(figsize=np.array([15, 9]) * 0.9, dpi=150, frameon=False)
     ax.axis("equal")
@@ -172,6 +159,7 @@ def plot_tables(
             },
             font_color=font_color,
             font_size=font_size,
+            bbox=dict(alpha=0.0),  # transparent background
             ax=ax,
         )
 
@@ -181,6 +169,7 @@ def plot_tables(
         buses["id"],
         node_color=[bus_load_cmap(bus_load_norm(load)) for load in buses["load"]],
         node_shape="s",
+        alpha=0.5,
     )
 
     generator_cmap = plt.get_cmap(name="tab10", lut=generators.height)
@@ -191,6 +180,7 @@ def plot_tables(
         offers["id"],
         node_color=[generator_colors[gid] for gid in offers["generator_id"]],
         node_shape="o",
+        alpha=0.5,
     )
 
     def label_nodes(labels: dict, font_color: str):
@@ -216,11 +206,13 @@ def plot_tables(
                     va="top",
                 )
 
-    bus_price_node_labels = node_annotations(buses, "id", "${:.2f}/MWh", "price")
+    bus_price_node_labels = node_annotations(
+        buses, "id", "{:.0f}MW\n${:.2f}/MWh", "load", "price"
+    )
     label_nodes(bus_price_node_labels, font_color="darkgreen")
 
     offer_price_node_labels = node_annotations(
-        offers, "id", "≤{:}MW\n@ ${:}/MWh", "max_quantity", "price"
+        offers, "id", "≤{:}MW\n${:}/MWh", "max_quantity", "price"
     )
     label_nodes(offer_price_node_labels, font_color="black")
 
@@ -287,8 +279,10 @@ def plot_tables(
 def plot(
     data: Data,
     result: Result,
-    kscale: float = 1.0,
+    font_size: int = 8,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
     **tables,
 ):
     augmented: dict[str, Any] = augment(data=data, result=result, **tables)
-    return plot_tables(**augmented, kscale=kscale)
+    return plot_tables(**augmented, font_size=font_size, scale_x=scale_x, scale_y=scale_y)

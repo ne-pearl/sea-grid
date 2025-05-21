@@ -4,5 +4,6 @@ linopy
 matplotlib
 networkx
 polars
+pygraphviz==1.14
 pyomo
 scipy

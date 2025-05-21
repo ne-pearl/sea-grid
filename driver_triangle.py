@@ -16,6 +16,8 @@ tables = dict(
         {
             "id": ["B1", "B2", "B3"],
             "load": [0.0, 0.0, 150.0],
+            "x": [0., 2., 1.],
+            "y": [1., 1., 0.],
         },
     ),
     reference_bus="B1",
@@ -44,7 +46,7 @@ tables = dict(
 
 data = Data.init(**tables)
 result: Result = formulate(data)
-plot(data=data, result=result, **tables, kscale=3)
+plot(data=data, result=result, **tables, font_size=12, scale_x = 1.5)
 plt.show(block=False)
 
 model = result.model
