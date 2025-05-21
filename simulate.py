@@ -4,7 +4,7 @@ import numpy as np
 from polars import DataFrame
 from datastructures import Data, Result
 from formulations import formulate, marginal_price
-from plotting import plot
+from plotting import display
 
 # Set random seed for reproducibility of networkx graph layouts
 random.seed(0)
@@ -46,7 +46,7 @@ tables = dict(
 
 data = Data.init(**tables)
 result: Result = formulate(data)
-plot(data=data, result=result, **tables, font_size=12, scale_x = 1.5)
+display(data=data, result=result, **tables, font_size=12, scale_x = 1.5)
 plt.show(block=False)
 
 model = result.model

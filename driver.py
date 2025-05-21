@@ -26,3 +26,22 @@ if __name__ == "__main__":
         scale_x=args.scale_x,
         scale_y=args.scale_y,
     )
+
+    # ====================================================================
+    import numpy as np
+
+    bus_indices = range(data.bus_load.size)
+    free_bus_ids = [b for b in bus_indices if b != data.reference_bus]
+    K = data.line_bus_incidence[:, free_bus_ids]
+    KtB = K.T @ np.diag(1.0 / data.line_reactance)
+    SF = np.linalg.solve(KtB @ K, -KtB).T
+    injections = result.dispatch_quantity @ data.offer_bus_incidence - data.bus_load
+    assert np.allclose(injections, -result.line_flow @ data.line_bus_incidence)
+    assert np.allclose(SF @ injections[free_bus_ids], result.line_flow)
+    assert np.allclose(
+        (data.line_bus_incidence @ result.voltage_angle)
+        * data.base_power
+        / data.line_reactance,
+        result.line_flow,
+    )
+

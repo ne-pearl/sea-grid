@@ -9,21 +9,21 @@ import polars as pl
 # Units of measure
 Id = pl.String
 Mile = pl.Float64
-MW = pl.Float64
-MWPerRad = pl.Float64
+PowerMW = pl.Float64
+ReactancePu = pl.Float64
 USDPerMWh = pl.Float64
 
-buses_schema = {"id": Id, "load": MW, "x": Mile, "y": Mile}
+buses_schema = {"id": Id, "load": PowerMW, "x": Mile, "y": Mile}
 generators_schema = {"id": Id, "bus_id": Id}
 lines_schema = {
     "from_bus_id": Id,
     "to_bus_id": Id,
-    "capacity": MW,
-    "reactance": MWPerRad,
+    "capacity": PowerMW,
+    "reactance": ReactancePu,
 }
 offers_schema = {
     "generator_id": Id,
-    "max_quantity": MW,
+    "max_quantity": PowerMW,
     "price": USDPerMWh,
 }
 
@@ -78,6 +78,7 @@ class Data(Serialization):
     line_bus_incidence: NDArray[np.int8]
     offer_bus_incidence: NDArray[np.int8]
     reference_bus: int
+    base_power: float  # [MVA]
 
     def __post_init__(self) -> None:
         """Validate array dimensions."""
@@ -100,6 +101,7 @@ class Data(Serialization):
         lines: pl.DataFrame,
         offers: pl.DataFrame,
         reference_bus: str,
+        base_power: float = 100,
     ) -> Self:
         """Initialize from dataframes."""
 
@@ -152,6 +154,7 @@ class Data(Serialization):
             line_bus_incidence=line_bus_incidence,
             offer_bus_incidence=offer_bus_incidence,
             reference_bus=reference_bus_index,
+            base_power=base_power,
         )
 
 

@@ -14,10 +14,7 @@ def optimize(model, **kwargs) -> float:
     return pyo.value(model.objective)
 
 
-def formulate(
-    data: Data,
-    tee: bool = False,
-) -> Result:
+def formulate(data: Data, tee: bool = False) -> Result:
     """Formulate the optimization problem for the given power system data."""
 
     model = pyo.ConcreteModel()
@@ -82,6 +79,7 @@ def formulate(
                 for b in bus_indices
                 if (sign := data.line_bus_incidence[ell, b]) != 0
             )
+            * data.base_power
             / data.line_reactance[ell]
         )
 

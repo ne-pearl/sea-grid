@@ -1,3 +1,4 @@
+import pprint
 from typing import Any, Callable
 import matplotlib.cm as cm
 import matplotlib.colors as mc
@@ -276,13 +277,20 @@ def plot_tables(
     return fig, ax
 
 
-def plot(
+def display(
     data: Data,
     result: Result,
-    font_size: int = 8,
-    scale_x: float = 1.0,
-    scale_y: float = 1.0,
+    font_size: int,
+    scale_x: float,
+    scale_y: float,
     **tables,
 ):
-    augmented: dict[str, Any] = augment(data=data, result=result, **tables)
-    return plot_tables(**augmented, font_size=font_size, scale_x=scale_x, scale_y=scale_y)
+    augmented: dict = augment(data=data, result=result, **tables)
+    pprint.pprint(augmented)
+    fig, ax = plot_tables(
+        **augmented,
+        font_size=font_size,
+        scale_x=scale_x,
+        scale_y=scale_y,
+    )
+    return augmented, fig, ax
