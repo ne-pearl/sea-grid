@@ -19,7 +19,7 @@ lines_schema = {
     "from_bus_id": Id,
     "to_bus_id": Id,
     "capacity": MW,
-    "susceptance": MWPerRad,
+    "reactance": MWPerRad,
 }
 offers_schema = {
     "generator_id": Id,
@@ -72,7 +72,7 @@ class Serialization:
 class Data(Serialization):
     bus_load: NDArray[np.float64]
     line_capacity: NDArray[np.float64]
-    line_susceptance: NDArray[np.float64]
+    line_reactance: NDArray[np.float64]
     offer_max_quantity: NDArray[np.float64]
     offer_price: NDArray[np.float64]
     line_bus_incidence: NDArray[np.int8]
@@ -81,7 +81,7 @@ class Data(Serialization):
 
     def __post_init__(self) -> None:
         """Validate array dimensions."""
-        assert len(self.line_capacity) == len(self.line_susceptance)
+        assert len(self.line_capacity) == len(self.line_reactance)
         assert len(self.offer_max_quantity) == len(self.offer_price)
         assert self.line_bus_incidence.shape == (
             len(self.line_capacity),
@@ -146,7 +146,7 @@ class Data(Serialization):
         return cls(
             bus_load=buses[:, "load"].to_numpy(),
             line_capacity=lines[:, "capacity"].to_numpy(),
-            line_susceptance=lines[:, "susceptance"].to_numpy(),
+            line_reactance=lines[:, "reactance"].to_numpy(),
             offer_max_quantity=offers[:, "max_quantity"].to_numpy(),
             offer_price=offers[:, "price"].to_numpy(),
             line_bus_incidence=line_bus_incidence,

@@ -1,4 +1,4 @@
-from_bus_id,to_bus_id,capacity,susceptance
+from_bus_id,to_bus_id,capacity,reactance
 F,G,120.,1.
 H,G,120.,1.
 H,E,120.,1.

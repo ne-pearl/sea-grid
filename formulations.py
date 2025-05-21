@@ -75,10 +75,14 @@ def formulate(
         )
 
     def flow_rule(model: Model, ell: int) -> EqualityExpression:
-        return model.f[ell] == sum(
-            sign * model.theta[b] * data.line_susceptance[ell]
-            for b in bus_indices
-            if (sign := data.line_bus_incidence[ell, b]) != 0
+        return (
+            model.f[ell]
+            == sum(
+                sign * model.theta[b]
+                for b in bus_indices
+                if (sign := data.line_bus_incidence[ell, b]) != 0
+            )
+            / data.line_reactance[ell]
         )
 
     # Equality constraints

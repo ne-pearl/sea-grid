@@ -32,7 +32,7 @@ tables = dict(
             "from_bus_id": ["B1", "B1", "B2"],
             "to_bus_id": ["B2", "B3", "B3"],
             "capacity": [30.0, 100.0, 100.0],
-            "susceptance": [1000.0, 1000.0, 1000.0],
+            "reactance": [1000.0, 1000.0, 1000.0],
         }
     ),
     offers=DataFrame(

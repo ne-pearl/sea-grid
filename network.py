@@ -41,13 +41,13 @@ lines = pl.DataFrame(
     {
         "from_bus_id": ["B1", "B1", "B2"],
         "to_bus_id": ["B2", "B3", "B3"],
-        "susceptance": [1000, 1000, 1000],
+        "reactance": [1000, 1000, 1000],
         "capacity": [30.0, 100.0, 100.0],
     },
     schema={
         "from_bus_id": Id,
         "to_bus_id": Id,
-        "susceptance": MWPerRad,
+        "reactance": MWPerRad,
         "capacity": MW,
     },
 )
@@ -89,10 +89,10 @@ model.loads = pyo.Param(
     mutable=True,
     doc="load (demand) @ bus [MW]",
 )
-model.susceptances = pyo.Param(
+model.reactances = pyo.Param(
     Lines,
-    initialize={ell: lines[ell, "susceptance"] for ell in Lines},
-    doc="susceptance (1/reactance) @ line [MW/rad]",
+    initialize={ell: lines[ell, "reactance"] for ell in Lines},
+    doc="reactance (1/reactance) @ line [MW/rad]",
 )
 
 
@@ -162,7 +162,7 @@ def balance_rule(model: Model, b: int) -> EqualityExpression:
 def flow_rule(model: Model, ell: int) -> EqualityExpression:
     return (
         sum(
-            sign * model.susceptances[b] * model.theta[b]
+            sign * model.reactances[b] * model.theta[b]
             for b in Buses
             if (sign := network_incidence(b, ell))
         )
@@ -396,15 +396,15 @@ for source in buses[:, "id"]:
                 orientation = 1 if from_node_id < to_node_id else -1
                 if orientation == -1:
                     from_node_id, to_node_id = to_node_id, from_node_id
-                susceptance, utilization = (
+                reactance, utilization = (
                     lines.filter(
                         (pl.col("from_bus_id") == from_node_id)
                         & (pl.col("to_bus_id") == to_node_id)
                     )
-                    .select(["susceptance", "utilization"])
+                    .select(["reactance", "utilization"])
                     .row(0)
                 )
-                path_resistance += 1 / susceptance
+                path_resistance += 1 / reactance
                 path_edge_rows.append(
                     dict(
                         from_node_id=from_node_id,
@@ -421,11 +421,11 @@ for source in buses[:, "id"]:
                     path_id=path_id,
                     source=source,
                     target=target,
-                    susceptance=1 / path_resistance,
+                    reactance=1 / path_resistance,
                 )
             )
             # for row in edge_rows:
-            #     row["path_susceptance"] = 1 / path_resistance
+            #     row["path_reactance"] = 1 / path_resistance
             # path_edge_rows.extend(edge_rows)
 
 paths = pl.DataFrame(path_rows)
@@ -433,14 +433,14 @@ path_edges = pl.DataFrame(path_edge_rows)
 
 group_keys = ["source", "target"]
 grouped = paths.group_by(group_keys).agg(
-    pl.col("susceptance").sum().alias("total_susceptance")
+    pl.col("reactance").sum().alias("total_reactance")
 )
 paths = paths.join(grouped, on=group_keys).with_columns(
-    (pl.col("susceptance") / pl.col("total_susceptance")).alias("relative_susceptance")
+    (pl.col("reactance") / pl.col("total_reactance")).alias("relative_reactance")
 )
 
 path_edges = path_edges.join(
-    paths[:, ("path_id", "source", "target", "relative_susceptance")], on=["path_id"]
+    paths[:, ("path_id", "source", "target", "relative_reactance")], on=["path_id"]
 )
 
 print("paths -", paths)
@@ -463,7 +463,7 @@ print("congestion_summary -", congestion_summary)
 
 print("Constraints implied by congestion:")
 for target, coeffs, sources in congestion_summary.select(
-    "target", "relative_susceptance", "source"
+    "target", "relative_reactance", "source"
 ).iter_rows():
     terms = [
         f"{c:.2f}*PTotal[{s}]" for c, s in zip(coeffs, sources) if s in input_nodes
