@@ -1,0 +1,4 @@
+from_bus_id,to_bus_id,capacity,reactance
+Bus1,Bus2,100.,0.25
+Bus1,Bus3,80.,0.25
+Bus2,Bus3,100.,0.25

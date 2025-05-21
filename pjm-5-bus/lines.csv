@@ -1,0 +1,7 @@
+from_bus_id,to_bus_id,capacity,reactance
+A,B,400.,2.81
+A,D,1000.,3.04
+A,E,1000.,0.64
+B,C,1000.,1.08
+C,D,1000.,2.97
+D,E,240.,2.97
