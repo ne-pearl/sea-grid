@@ -11,7 +11,7 @@ MW = pl.Float64
 MWPerRad = pl.Float64
 USDPerMWh = pl.Float64
 
-buses_input_schema = {"id": Id}
+buses_input_schema = {"id": Id, "load": MW}
 generators_input_schema = {"id": Id, "bus_id": Id}
 lines_input_schema = {
     "from_bus_id": Id,
@@ -94,7 +94,6 @@ class Data(Serialization):
     def init(
         cls,
         buses: pl.DataFrame,
-        demands: pl.DataFrame,
         generators: pl.DataFrame,
         lines: pl.DataFrame,
         offers: pl.DataFrame,
@@ -108,7 +107,6 @@ class Data(Serialization):
         assert validate(offers, offers_input_schema)
 
         bus_indices = range(buses.height)
-        demand_indices = range(demands.height)
         generator_indices = range(generators.height)
         line_indices = range(lines.height)
         offer_indices = range(offers.height)
@@ -126,12 +124,6 @@ class Data(Serialization):
             generator_offer: bool = generators[g, "id"] == offers[o, "generator_id"]
             return bus_generator and generator_offer
 
-        def load_incidence(d: int, b: int) -> bool:
-            if buses[b, "id"] == demands[d, "bus_id"]:
-                return -1
-            else:
-                return 0
-
         line_bus_incidence = np.array(
             [[network_incidence(ell, b) for b in bus_indices] for ell in line_indices]
         )
@@ -146,17 +138,11 @@ class Data(Serialization):
             dtype=float,
         )
 
-        load_bus_incidence = np.array(
-            [[load_incidence(d, b) for b in bus_indices] for d in demand_indices],
-            dtype=float,
-        )
-        demand_loads = demands[:, "load"].to_numpy()
-
         reference_bus_index = buses["id"].index_of(reference_bus)
         assert reference_bus_index is not None
 
         return cls(
-            bus_load=demand_loads @ -load_bus_incidence,
+            bus_load=buses[:, "load"].to_numpy(),
             line_capacity=lines[:, "capacity"].to_numpy(),
             line_susceptance=lines[:, "susceptance"].to_numpy(),
             offer_max_quantity=offers[:, "max_quantity"].to_numpy(),

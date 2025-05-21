@@ -1,4 +1,5 @@
 import random
+from matplotlib import pyplot as plt
 import numpy as np
 from polars import DataFrame
 from datastructures import Data, Result
@@ -14,16 +15,10 @@ tables = dict(
     buses=DataFrame(
         {
             "id": ["B1", "B2", "B3"],
+            "load": [0.0, 0.0, 150.0],
         },
     ),
     reference_bus="B1",
-    demands=DataFrame(
-        {
-            "id": ["D1", "D2"],
-            "bus_id": ["B3", "B3"],
-            "load": [100.0, 50.0],
-        }
-    ),
     generators=DataFrame(
         {
             "id": ["G1", "G2", "G3"],
@@ -49,7 +44,8 @@ tables = dict(
 
 data = Data.init(**tables)
 result: Result = formulate(data)
-plot(data=data, result=result, **tables)
+plot(data=data, result=result, **tables, kscale=3)
+plt.show(block=False)
 
 model = result.model
 assert np.isclose(

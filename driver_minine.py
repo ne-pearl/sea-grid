@@ -1,5 +1,6 @@
 import pathlib
 import random
+from matplotlib import pyplot as plt
 import numpy as np
 from polars import read_csv
 from datastructures import Data, Result
@@ -8,15 +9,15 @@ from plotting import plot
 
 random.seed(0)
 np.random.seed(0)
-data = pathlib.Path("minine")
+basedir = pathlib.Path("minine")
 tables = dict(
-    buses=read_csv(data / "buses.csv"),
+    buses=read_csv(basedir / "buses.csv"),
     reference_bus="NEMA",
-    demands=read_csv(data / "demands.csv"),
-    generators=read_csv(data / "generators.csv"),
-    lines=read_csv(data / "lines.csv"),
-    offers=read_csv(data / "offers.csv").sort(by=["generator_id", "price"]),
+    generators=read_csv(basedir / "generators.csv"),
+    lines=read_csv(basedir / "lines.csv"),
+    offers=read_csv(basedir / "offers.csv").sort(by=["generator_id", "price"]),
 )
-data = Data.init(**tables)
-result: Result = formulate(data)
-plot(data=data, result=result, **tables, scale=3.0, k=None)
+basedir = Data.init(**tables)
+result: Result = formulate(basedir)
+plot(data=basedir, result=result, **tables, kscale=2)
+plt.show(block=False)
