@@ -44,6 +44,11 @@ offers = DataFrame(
         ("Solitude", 520.0, 30.0),
         ("Sundance", 200.0, 40.0),
         ("Brighton", 600.0, 10.0),
+        ("Alta", 40.0, 140.0),
+        ("ParkCity", 170.0, 150.0),
+        ("Solitude", 520.0, 300.0),
+        ("Sundance", 200.0, 400.0),
+        ("Brighton", 600.0, 100.0),
     ],
     columns=["generator_id", "quantity", "price"],
 )
