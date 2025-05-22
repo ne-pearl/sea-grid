@@ -23,6 +23,7 @@ def formulate(data: Data, tee: bool = False) -> Result:
     bus_indices = range(data.bus_load.size)
     line_indices = range(data.line_bus_incidence.shape[0])
     offer_indices = range(data.offer_bus_incidence.shape[0])
+    free_bus_ids = [b for b in bus_indices if b != data.reference_bus]
 
     # Parameters for pricing
     model.bus_loads = pyo.Param(
@@ -82,6 +83,11 @@ def formulate(data: Data, tee: bool = False) -> Result:
             * data.base_power
             / data.line_reactance[ell]
         )
+
+    # Shift factor matrix
+    K = data.line_bus_incidence[:, free_bus_ids]
+    KtB = K.T @ np.diag(1.0 / data.line_reactance)
+    SF = np.linalg.solve(KtB @ K, -KtB).T
 
     # Equality constraints
     model.balance = pyo.Constraint(
