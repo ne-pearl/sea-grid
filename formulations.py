@@ -52,7 +52,7 @@ def formulate(data: Data, tee: bool = False) -> Result:
 
     model.p = pyo.Var(model.Offers, bounds=supply_bounds, doc="dispatch @ offer [MW]")
     model.f = pyo.Var(model.Lines, doc="power flow @ line [MW]")
-    model.theta = pyo.Var(model.Buses, doc="voltage angle @ bus [rad]")
+    model.θ = pyo.Var(model.Buses, doc="voltage angle @ bus [rad]")
 
     # For objective sentivity to constraint parameters
     model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
@@ -83,7 +83,7 @@ def formulate(data: Data, tee: bool = False) -> Result:
         return (
             model.f[ell]
             == sum(
-                sign * model.theta[b]
+                sign * model.θ[b]
                 for b in model.Buses
                 if (sign := data.line_bus_incidence[ell, b]) != 0
             )
@@ -97,7 +97,7 @@ def formulate(data: Data, tee: bool = False) -> Result:
     )
     model.flow = pyo.Constraint(model.Lines, rule=flow_rule, doc="power flow @ line")
     model.reference_angle = pyo.Constraint(
-        expr=model.theta[data.reference_bus] == 0,
+        expr=model.θ[data.reference_bus] == 0,
         doc="reference voltage angle @ bus[0]",
     )
 
@@ -126,7 +126,7 @@ def formulate(data: Data, tee: bool = False) -> Result:
         total_cost=total_cost,
         dispatch_quantity=np.array([pyo.value(model.p[o]) for o in model.Offers]),
         line_flow=np.array([pyo.value(model.f[ell]) for ell in model.Lines]),
-        voltage_angle=np.array([pyo.value(model.theta[b]) for b in model.Buses]),
+        voltage_angle=np.array([pyo.value(model.θ[b]) for b in model.Buses]),
         energy_price=np.array(
             [get_price(model, model.balance[b]) for b in model.Buses]
         ),
