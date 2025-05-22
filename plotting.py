@@ -49,9 +49,9 @@ def augment(
             right_on="id",
             how="left",
         )
-        .with_columns(pl.Series(result.dispatch_quantity).alias("quantity"))
+        .with_columns(pl.Series(result.dispatch_quantity).alias("dispatched"))
         .with_columns(
-            (pl.col("quantity") / pl.col("max_quantity") * 100).alias("utilization")
+            (pl.col("dispatched") / pl.col("quantity") * 100).alias("utilization")
         )
     )
     return dict(
@@ -213,7 +213,7 @@ def plot_tables(
     label_nodes(bus_price_node_labels, font_color="darkgreen")
 
     offer_price_node_labels = node_annotations(
-        offers, "id", "≤{:}MW\n${:}/MWh", "max_quantity", "price"
+        offers, "id", "≤{:}MW\n${:}/MWh", "quantity", "price"
     )
     label_nodes(offer_price_node_labels, font_color="black")
 
@@ -235,7 +235,7 @@ def plot_tables(
         lines, "from_bus_id", "to_bus_id", "{:.0f}MW\n{:.0f}%", "flow", "utilization"
     )
     supply_edge_labels = edge_annotations(
-        offers, "id", "bus_id", "{:.0f}MW", "quantity"
+        offers, "id", "bus_id", "{:.0f}MW", "dispatched"
     )
     edge_labels = flow_edge_labels | supply_edge_labels
 
@@ -259,7 +259,7 @@ def plot_tables(
         font_color="red",
     )
 
-    total_cost = sum(offers[:, "quantity"] * offers[:, "price"])
+    total_cost = sum(offers[:, "dispatched"] * offers[:, "price"])
     load_payment = sum(buses[:, "load"] * buses[:, "price"])
 
     # Display network

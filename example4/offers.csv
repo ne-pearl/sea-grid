@@ -1,3 +1,3 @@
-generator_id,max_quantity,price
+generator_id,quantity,price
 G1,200.,10.
 G2,200.,12.

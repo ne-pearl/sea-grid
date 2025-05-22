@@ -41,7 +41,7 @@ def formulate(data: Data, tee: bool = False) -> Result:
 
     # Decision variables & bounds
     def supply_bounds(model: Model, o: int) -> tuple[float, float]:
-        return (0.0, data.offer_max_quantity[o])
+        return (0.0, data.offer_quantity[o])
 
     model.p = pyo.Var(offer_indices, bounds=supply_bounds, doc="dispatch @ offer [MW]")
     model.f = pyo.Var(line_indices, doc="power flow @ line [MW]")

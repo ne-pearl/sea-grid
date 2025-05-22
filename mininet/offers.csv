@@ -1,4 +1,4 @@
-generator_id,max_quantity,price
+generator_id,quantity,price
 A1,200.,12.
 A2,200.,13.
 F1,200.,14.

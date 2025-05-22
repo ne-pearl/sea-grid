@@ -62,10 +62,10 @@ lines = lines.with_columns(
 offers = pl.DataFrame(
     {
         "generator_id": ["G1", "G2", "G3", "G1", "G2", "G3", "G1", "G2", "G3"],
-        "max_quantity": [200.0, 200.0, 200.0, 100.0, 100.0, 100.0, 200.0, 200.0, 200.0],
+        "quantity": [200.0, 200.0, 200.0, 100.0, 100.0, 100.0, 200.0, 200.0, 200.0],
         "price": [10.00, 12.00, 14.00, 20.00, 22.00, 24.00, 15.00, 16.00, 17.00],
     },
-    schema={"generator_id": Id, "max_quantity": MW, "price": USDPerMWh},
+    schema={"generator_id": Id, "quantity": MW, "price": USDPerMWh},
 ).sort(by=["generator_id", "price"])
 
 # Unique identifier for each offer
@@ -98,7 +98,7 @@ model.reactances = pyo.Param(
 
 # Model decision variables
 def supply_bounds(model: Model, o: int) -> tuple[float, float]:
-    return (0.0, offers[o, "max_quantity"])
+    return (0.0, offers[o, "quantity"])
 
 
 def flow_bounds(model: Model, ell: int) -> tuple[float, float]:
@@ -211,7 +211,7 @@ offers = offers.join(  # bus_id for each offer
     generators[:, ("id", "bus_id")], left_on="generator_id", right_on="id", how="left"
 )
 offers = offers.with_columns(  # utilization of each offer
-    (pl.col("quantity") / pl.col("max_quantity")).alias("utilization")
+    (pl.col("dispatched") / pl.col("quantity")).alias("utilization")
 )
 
 print("offers -", offers)
@@ -279,7 +279,7 @@ bus_price_labels = mapvalues(
     "{:}MW\n@ ${:.2f}/MWh".format, buses["id"], buses["load"], buses["price"]
 )
 offer_price_labels = mapvalues(
-    "{:}MW\n@ ${:}/MWh".format, offers["id"], offers["max_quantity"], offers["price"]
+    "{:}MW\n@ ${:}/MWh".format, offers["id"], offers["quantity"], offers["price"]
 )
 load_norm = mc.Normalize(vmin=min(buses["load"]), vmax=max(buses["load"]))
 load_cmap = cm.coolwarm  # Or plasma, inferno, magma, coolwarm, etc.
@@ -306,8 +306,8 @@ flow_labels = mapvalues(
 supply_labels = mapvalues(
     "{:.0f}MW/\n{:.0f}MW".format,
     zip(offers["id"], offers["bus_id"]),
+    offers["dispatched"],
     offers["quantity"],
-    offers["max_quantity"],
 )
 network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
 network.add_edges_from(zip(offers["id"], offers["bus_id"]))

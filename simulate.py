@@ -38,13 +38,13 @@ tables = dict(
     offers=DataFrame(
         {
             "generator_id": ["G1", "G2", "G3", "G1", "G2", "G3"],
-            "max_quantity": [200.0, 200.0, 200.0, 100.0, 100.0, 100.0],
+            "quantity": [200.0, 200.0, 200.0, 100.0, 100.0, 100.0],
             "price": [10.00, 12.00, 14.00, 20.00, 22.00, 24.00],
         },
     ).sort(by=["generator_id", "price"]),
 )
 
-data = Data.init(**tables)
+data = Data.from_dataframes(**tables)
 result: Result = formulate(data)
 display(data=data, result=result, **tables, font_size=12, scale_x = 1.5)
 plt.show(block=False)

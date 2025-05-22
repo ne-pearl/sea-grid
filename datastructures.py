@@ -5,33 +5,7 @@ from typing import Any, Callable, Generic, Optional, Self, TypeVar, Union
 import numpy as np
 from numpy.typing import NDArray
 import polars as pl
-
-# Units of measure
-Id = pl.String
-Mile = pl.Float64
-PowerMW = pl.Float64
-ReactancePu = pl.Float64
-USDPerMWh = pl.Float64
-
-buses_schema = {"id": Id, "load": PowerMW, "x": Mile, "y": Mile}
-generators_schema = {"id": Id, "bus_id": Id}
-lines_schema = {
-    "from_bus_id": Id,
-    "to_bus_id": Id,
-    "capacity": PowerMW,
-    "reactance": ReactancePu,
-}
-offers_schema = {
-    "generator_id": Id,
-    "max_quantity": PowerMW,
-    "price": USDPerMWh,
-}
-
-
-def validate(dataframe: pl.DataFrame, schema: dict) -> bool:
-    """Validate the schema of a DataFrame."""
-    return schema.items() <= dataframe.schema.items()
-
+from sea_schema import *
 
 @dataclasses.dataclass(frozen=True, repr=False, slots=True)
 class Serialization:
@@ -73,7 +47,7 @@ class Data(Serialization):
     bus_load: NDArray[np.float64]
     line_capacity: NDArray[np.float64]
     line_reactance: NDArray[np.float64]
-    offer_max_quantity: NDArray[np.float64]
+    offer_quantity: NDArray[np.float64]
     offer_price: NDArray[np.float64]
     line_bus_incidence: NDArray[np.int8]
     offer_bus_incidence: NDArray[np.int8]
@@ -83,7 +57,7 @@ class Data(Serialization):
     def __post_init__(self) -> None:
         """Validate array dimensions."""
         assert len(self.line_capacity) == len(self.line_reactance)
-        assert len(self.offer_max_quantity) == len(self.offer_price)
+        assert len(self.offer_quantity) == len(self.offer_price)
         assert self.line_bus_incidence.shape == (
             len(self.line_capacity),
             len(self.bus_load),
@@ -94,7 +68,7 @@ class Data(Serialization):
         )
 
     @classmethod
-    def init(
+    def from_dataframes(
         cls,
         buses: pl.DataFrame,
         generators: pl.DataFrame,
@@ -149,7 +123,7 @@ class Data(Serialization):
             bus_load=buses[:, "load"].to_numpy(),
             line_capacity=lines[:, "capacity"].to_numpy(),
             line_reactance=lines[:, "reactance"].to_numpy(),
-            offer_max_quantity=offers[:, "max_quantity"].to_numpy(),
+            offer_quantity=offers[:, "quantity"].to_numpy(),
             offer_price=offers[:, "price"].to_numpy(),
             line_bus_incidence=line_bus_incidence,
             offer_bus_incidence=offer_bus_incidence,

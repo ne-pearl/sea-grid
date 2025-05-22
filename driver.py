@@ -16,7 +16,7 @@ if __name__ == "__main__":
     directory: pathlib.Path = args.directory
     assert directory.exists(), f'"{directory.resolve()}" does not exist'
     tables = load(directory)
-    data = Data.init(**tables)
+    data = Data.from_dataframes(**tables)
     result: Result = formulate(data)
     display(
         data=data,
