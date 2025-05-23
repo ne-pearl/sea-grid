@@ -1,7 +1,7 @@
 from pandas import DataFrame
 
 base_power = 100  # [MVA]
-reference_bus = "A"
+reference_bus = "C"
 
 buses = DataFrame(
     [

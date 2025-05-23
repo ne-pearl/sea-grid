@@ -2,11 +2,9 @@ import cvxpy as cp
 import sea_incidence as incidence
 from pjm5bus_pandas import buses, generators, lines, offers, reference_bus, base_power
 
-
 line_bus = incidence.line_bus(buses=buses, lines=lines)
 offer_bus = incidence.offer_bus(offers=offers, buses=buses, generators=generators)
 reference_bus_index = incidence.reference_bus(buses, reference_bus)
-
 bus_idx = {bus_id: i for i, bus_id in enumerate(buses["id"])}
 offers = offers.merge(generators, left_on="generator_id", right_on="id")
 
@@ -14,28 +12,17 @@ p = cp.Variable(len(offers), name="p")  # generation
 f = cp.Variable(len(lines), name="f")  # line flows
 θ = cp.Variable(len(buses), name="θ")  # bus angles
 
-balance_constraints = []
-for i, row in buses.iterrows():
-    bus_id = row["id"]
-    offers_in = offers[offers["bus_id"] == bus_id].index
-    lines_in = lines[lines["to_bus_id"] == bus_id].index
-    lines_out = lines[lines["from_bus_id"] == bus_id].index
-    balance_constraints.append(
-        cp.sum(p[offers_in]) + cp.sum(f[lines_in])
-        == buses.at[i, "load"] + cp.sum(f[lines_out])
-    )
-
-flow_constraints = []
-for i, row in lines.iterrows():
-    bus_from = bus_idx[row["from_bus_id"]]
-    bus_to = bus_idx[row["to_bus_id"]]
-    reactance = row["reactance"]
-    flow_constraints.append(f[i] == (θ[bus_from] - θ[bus_to]) * base_power / reactance)
-
+balance_constraints = [
+    cp.sum(p @ offer_bus[:, b]) + cp.sum(f @ line_bus[:, b]) == buses.at[b, "load"]
+    for b in buses.index
+]
+flow_constraints = [
+    f[ell] == (line_bus[ell, :] @ θ) * base_power / lines.at[ell, "reactance"]
+    for ell in lines.index
+]
 objective = cp.Minimize(
     cp.sum([offer["price"] * p[o] for o, offer in offers.iterrows()])
 )
-
 problem = cp.Problem(
     objective,
     [
