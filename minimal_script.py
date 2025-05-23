@@ -1,37 +1,13 @@
-# %% [markdown]
-# External dependencies
-
-# %%
 import cvxpy as cp
+from pjm5bus_pandas import buses, generators, lines, offers, reference_bus, base_power
 
-# %% [markdown]
-# Problem data
-
-# %%
-from pjm5bus_pandas import buses, generators, lines, offers, reference_bus
-
-base_power = 100  # [MVA]
-
-# %% [markdown]
-# Build index mappings
-
-# %%
 bus_idx = {bus_id: i for i, bus_id in enumerate(buses["id"])}
 offers = offers.merge(generators, left_on="generator_id", right_on="id")
 
-# %% [markdown]
-# Decision variables
-
-# %%
 p = cp.Variable(len(offers), name="p")  # generation
 f = cp.Variable(len(lines), name="f")  # line flows
 θ = cp.Variable(len(buses), name="θ")  # bus angles
 
-
-# %% [markdown]
-# Power balance constraint at each bus
-
-# %%
 balance_constraints = []
 for i, row in buses.iterrows():
     bus_id = row["id"]
@@ -43,10 +19,6 @@ for i, row in buses.iterrows():
         == buses.at[i, "load"] + cp.sum(f[lines_out])
     )
 
-# %% [markdown]
-# Power flow constraint on each line
-
-# %%
 flow_constraints = []
 for i, row in lines.iterrows():
     bus_from = bus_idx[row["from_bus_id"]]
@@ -54,18 +26,10 @@ for i, row in lines.iterrows():
     reactance = row["reactance"]
     flow_constraints.append(f[i] == (θ[bus_from] - θ[bus_to]) * base_power / reactance)
 
-# %% [markdown]
-# Objective function
-
-# %%
 objective = cp.Minimize(
     cp.sum([offer["price"] * p[o] for o, offer in offers.iterrows()])
 )
 
-# %% [markdown]
-# Solve
-
-# %%
 problem = cp.Problem(
     objective,
     [
@@ -80,10 +44,6 @@ problem = cp.Problem(
 )
 problem.solve(solver="ECOS")
 
-# %% [markdown]
-# Attach results
-
-# %%
 offers["dispatch"] = p.value
 lines["flow"] = f.value
 buses["angle"] = θ.value

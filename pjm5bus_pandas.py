@@ -1,5 +1,8 @@
 from pandas import DataFrame
 
+base_power = 100  # [MVA]
+reference_bus = "A"
+
 buses = DataFrame(
     [
         ("A", 0.0, 0.0, 0.0),
@@ -10,7 +13,6 @@ buses = DataFrame(
     ],
     columns=["id", "load", "x", "y"],
 )
-reference_bus = "A"
 
 generators = DataFrame(
     [

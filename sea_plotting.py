@@ -9,6 +9,9 @@ import numpy as np
 from pandas import DataFrame
 from datastructures import Data, Result
 
+FONT_SIZE: int = 8  # [points]
+LABEL_OFFSET: float = -1.2  # times font_size
+
 
 def normalize(xy: np.ndarray, scale_x: float = 1.0, scale_y: float = 1.0) -> np.ndarray:
     """Shift and scale points to [-1,1]^2, with optional rescaling."""
@@ -36,153 +39,177 @@ def edge_annotations(
     return dict(zip(keys, values))
 
 
-def plot_tables(
+def label_nodes(
+    fig: plt.Figure,
+    ax: plt.Axes,
+    pos: dict[str, np.ndarray],
+    labels: dict[str, str],
+    font_color: str,
+    font_size: int,
+    offset: float,
+):
+    offset = mpt.offset_copy(
+        ax.transData, fig=fig, x=0, y=font_size * offset, units="points"
+    )
+    print(type(offset), offset)
+    for node, (x, y) in pos.items():
+        label = labels.get(node)
+        if label is not None:
+            ax.text(
+                x,
+                y,
+                label,
+                transform=offset,
+                fontsize=font_size,
+                color=font_color,
+                ha="center",
+                va="top",
+            )
+
+
+def draw_nodes(
+    ax: plt.Axes,
+    network: nx.Graph,
+    pos: dict[str, np.ndarray],
+    nodelist: list[str],
+    font_color: str,
+    font_size: int,
+    **kwargs,
+):
+    nx.draw_networkx_nodes(network, pos, nodelist=nodelist, ax=ax, **kwargs)
+    nx.draw_networkx_labels(
+        network,
+        pos,
+        labels={id: id for id in nodelist},
+        font_size=font_size,
+        font_color=font_color,
+        ax=ax,
+    )
+
+
+def draw_edge_labels(
+    select: Callable[[float], bool],
+    ax: plt.Axes,
+    network: nx.Graph,
+    pos: dict[str, np.ndarray],
+    edge_labels: dict,
+    weight: dict,
+    font_color: str,
+    font_size: int,
+) -> dict:
+    nx.draw_networkx_edge_labels(
+        network,
+        pos,
+        edge_labels={
+            key: value for key, value in edge_labels.items() if select(weight[*key])
+        },
+        font_color=font_color,
+        font_size=font_size,
+        bbox=dict(alpha=0.0),  # transparent background
+        ax=ax,
+    )
+
+
+def make_network(
     buses: DataFrame,
-    generators: DataFrame,
     lines: DataFrame,
     offers: DataFrame,
     scale_x: float = 1.0,
     scale_y: float = 1.0,
-    font_size: int = 8,  # [points]
-    **_,
-) -> None:
-    """Plot the problem data, dispatch instructions, and prices."""
-
-    # Network definition for plotting
+):
+    """Network definition for plotting."""
     network = nx.DiGraph()
-
-    # Nodes
     network.add_nodes_from(buses["id"])
     network.add_nodes_from(offers["id"])
-
-    # Edges
-    line_edges = list(zip(lines["from_bus_id"], lines["to_bus_id"]))
-    line_utilization = lines["utilization"].to_list()
-    network.add_weighted_edges_from(
-        zip(*zip(*line_edges), line_utilization),
-        weight="utilization",
-        tag="lines",
-    )
-    offer_edges = list(zip(offers["id"], offers["bus_id"]))
-    offer_utilization = offers["utilization"].to_list()
-    network.add_weighted_edges_from(
-        zip(*zip(*offer_edges), offer_utilization),
-        weight="utilization",
-        tag="offers",
-    )
-
-    # Node positions
-    # Undirected since some layout algorithms perform poorly with directed graphs
+    network.add_edges_from(zip(lines["from_bus_id"], lines["to_bus_id"]))
+    network.add_edges_from(zip(offers["id"], offers["bus_id"]))
     pos: dict = nx.nx_agraph.graphviz_layout(network.to_undirected())
-
     # Scale coordinates to properly fill the figure
     xy = np.vstack(tuple(pos.values()))
     pos = dict(zip(pos.keys(), normalize(xy, scale_x, scale_y)))
+    return network, pos
 
-    # Create blank figure and plotting axes
-    fig, ax = plt.subplots(figsize=np.array([15, 9]) * 0.9, dpi=150, frameon=False)
-    ax.axis("equal")
 
-    def draw_nodes(nodelist, font_color="black", **kwargs):
-        nonlocal ax, network, pos, font_size
-        nx.draw_networkx_nodes(network, pos, nodelist=nodelist, ax=ax, **kwargs)
-        nx.draw_networkx_labels(
-            network,
-            pos,
-            labels={id: id for id in nodelist},
-            font_size=font_size,
-            font_color=font_color,
-            ax=ax,
-        )
-
-    def draw_edge_labels(
-        selected: Callable[[float], bool],
-        edge_labels: dict,
-        utilization: dict,
-        font_color: str,
-    ) -> dict:
-        nonlocal ax, network, pos, font_size
-        nx.draw_networkx_edge_labels(
-            network,
-            pos,
-            edge_labels={
-                key: value
-                for key, value in edge_labels.items()
-                if selected(utilization[*key])
-            },
-            font_color=font_color,
-            font_size=font_size,
-            bbox=dict(alpha=0.0),  # transparent background
-            ax=ax,
-        )
-
+def plot_network(
+    fig: plt.Figure,
+    ax: plt.Axes,
+    network: nx.Graph,
+    pos: dict[str, np.ndarray],
+    buses: DataFrame,
+    generators: DataFrame,
+    offers: DataFrame,
+    font_size: int = FONT_SIZE,  # [points]
+    label_offset: float = LABEL_OFFSET,  # times font_size
+):
+    """Plot the problem data, dispatch instructions, and prices."""
     bus_load_norm = mc.Normalize(vmin=min(buses["load"]), vmax=max(buses["load"]))
     bus_load_cmap = cm.coolwarm  # coolwarm | inferno | magma | plasma etc.
     draw_nodes(
-        buses["id"],
+        nodelist=buses["id"],
         node_color=[bus_load_cmap(bus_load_norm(load)) for load in buses["load"]],
+        ax=ax,
+        network=network,
+        pos=pos,
+        font_color="black",
+        font_size=font_size,
         node_shape="s",
         alpha=0.5,
     )
-
     generator_cmap = plt.get_cmap(name="tab10", lut=len(generators))
     generator_colors = {
         gid: mc.to_hex(generator_cmap(i)) for i, gid in enumerate(generators["id"])
     }
     draw_nodes(
-        offers["id"],
+        nodelist=offers["id"],
         node_color=[generator_colors[gid] for gid in offers["generator_id"]],
+        font_color="black",
+        font_size=font_size,
         node_shape="o",
         alpha=0.5,
-    )
-
-    def label_nodes(labels: dict, font_color: str):
-        nonlocal pos, font_size
-        offset = mpt.offset_copy(
-            ax.transData,
-            fig=fig,
-            x=0,
-            y=-(font_size + 2),
-            units="points",
-        )
-        for node, (x, y) in pos.items():
-            label = labels.get(node)
-            if label is not None:
-                ax.text(
-                    x,
-                    y,
-                    label,
-                    transform=offset,
-                    fontsize=font_size,
-                    color=font_color,
-                    ha="center",
-                    va="top",
-                )
-
-    bus_price_node_labels = node_annotations(
-        buses, "id", "{:.0f}MW\n${:.2f}/MWh", "load", "price"
-    )
-    label_nodes(bus_price_node_labels, font_color="darkgreen")
-
-    offer_price_node_labels = node_annotations(
-        offers, "id", "≤{:}MW\n${:}/MWh", "quantity", "price"
-    )
-    label_nodes(offer_price_node_labels, font_color="black")
-
-    # NetworkX does not preserve edge insertion order, so reconstruct a consistent ordering
-    utilization = nx.get_edge_attributes(network, "utilization")
-
-    nx.draw_networkx_edges(
-        network,
-        pos,
-        edgelist=utilization.keys(),
-        edge_color=utilization.values(),
-        edge_cmap=cm.coolwarm,
-        edge_vmin=0.0,
-        edge_vmax=100.0,
         ax=ax,
+        network=network,
+        pos=pos,
     )
+    label_nodes(
+        labels=node_annotations(buses, "id", "{:.0f}MW", "load"),
+        offset=label_offset,
+        font_color="darkgreen",
+        font_size=font_size,
+        fig=fig,
+        ax=ax,
+        pos=pos,
+    )
+    label_nodes(
+        labels=node_annotations(offers, "id", "≤{:}MW\n${:}/MWh", "quantity", "price"),
+        offset=label_offset,
+        font_color="black",
+        font_size=font_size,
+        fig=fig,
+        ax=ax,
+        pos=pos,
+    )
+    # No labels available at this point
+    nx.draw_networkx_edges(network, pos, ax=ax)
 
+
+def plot_opf(
+    fig: plt.Figure,
+    ax: plt.Axes,
+    network: nx.Graph,
+    pos: dict[str, np.ndarray],
+    buses: DataFrame,
+    lines: DataFrame,
+    offers: DataFrame,
+    font_size: int = FONT_SIZE,  # [points]
+    label_offset: float = LABEL_OFFSET,  # times font_size
+):
+    epsilon = 1 / 100
+    # fmt: off
+    utilization = (
+        dict(zip(zip(offers["id"], offers["bus_id"]), offers["utilization"])) |
+        dict(zip(zip(lines["from_bus_id"], lines["to_bus_id"]), lines["utilization"]))
+    )
+    # fmt: on
     flow_edge_labels = edge_annotations(
         lines, "from_bus_id", "to_bus_id", "{:.0f}MW\n{:.0f}%", "flow", "utilization"
     )
@@ -191,24 +218,54 @@ def plot_tables(
     )
     edge_labels = flow_edge_labels | supply_edge_labels
 
-    epsilon = 1.0  # [%]
+    label_nodes(
+        labels=node_annotations(buses, "id", "${:.2f}/MWh", "price"),
+        offset=label_offset * 2,
+        font_color="darkgreen",
+        font_size=font_size,
+        fig=fig,
+        ax=ax,
+        pos=pos,
+    )
+    nx.draw_networkx_edges(
+        network,
+        pos,
+        edgelist=utilization.keys(),
+        edge_color=utilization.values(),
+        edge_vmin=0.0,
+        edge_vmax=1.0,
+        edge_cmap=cm.coolwarm,
+        ax=ax,
+    )
     draw_edge_labels(
-        lambda percent: 0.0 <= percent < epsilon,
+        select=lambda u: u < epsilon,
+        weight=utilization,
         edge_labels=edge_labels,
-        utilization=utilization,
+        ax=ax,
+        network=network,
+        pos=pos,
         font_color="black",
+        font_size=font_size,
     )
     draw_edge_labels(
-        lambda percent: epsilon <= percent <= 100.0 - epsilon,
+        select=lambda u: epsilon <= u <= 1.0 - epsilon,
+        weight=utilization,
         edge_labels=edge_labels,
-        utilization=utilization,
+        ax=ax,
+        network=network,
+        pos=pos,
         font_color="blue",
+        font_size=font_size,
     )
     draw_edge_labels(
-        lambda percent: 100.0 - epsilon < percent,
+        select=lambda u: 1.0 - epsilon < u,
+        weight=utilization,
         edge_labels=edge_labels,
-        utilization=utilization,
+        ax=ax,
+        network=network,
+        pos=pos,
         font_color="red",
+        font_size=font_size,
     )
 
     total_cost = sum(offers["dispatch"] * offers["price"])
@@ -225,24 +282,3 @@ def plot_tables(
         ha="right",
         fontsize=font_size,
     )
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
-    return fig, ax
-
-
-def display(
-    data: Data,
-    result: Result,
-    font_size: int,
-    scale_x: float,
-    scale_y: float,
-    **tables,
-):
-    augmented: dict = augment(data=data, result=result, **tables)
-    pprint.pprint(augmented)
-    fig, ax = plot_tables(
-        **augmented,
-        font_size=font_size,
-        scale_x=scale_x,
-        scale_y=scale_y,
-    )
-    return augmented, fig, ax
