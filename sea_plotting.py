@@ -1,5 +1,4 @@
-import pprint
-from typing import Any, Callable
+from typing import Callable
 import matplotlib.cm as cm
 import matplotlib.colors as mc
 import matplotlib.pyplot as plt
@@ -7,7 +6,6 @@ import matplotlib.transforms as mpt
 import networkx as nx
 import numpy as np
 from pandas import DataFrame
-from datastructures import Data, Result
 
 FONT_SIZE: int = 8  # [points]
 LABEL_OFFSET: float = -1.2  # times font_size
@@ -48,10 +46,9 @@ def label_nodes(
     font_size: int,
     offset: float,
 ):
-    offset = mpt.offset_copy(
+    offset: mpt.Transform = mpt.offset_copy(
         ax.transData, fig=fig, x=0, y=font_size * offset, units="points"
     )
-    print(type(offset), offset)
     for node, (x, y) in pos.items():
         label = labels.get(node)
         if label is not None:
