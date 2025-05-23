@@ -34,7 +34,7 @@ buses = DataFrame(
     schema={"id": Id, "load": MW, "x": Distance, "y": Distance},
     orient="row",
 )
-reference_bus = "A"
+reference_bus = "D"
 
 # %%
 generators = DataFrame(
