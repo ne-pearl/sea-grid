@@ -19,11 +19,11 @@ generators = DataFrame(
 )
 lines = DataFrame(
     [
-        ("Bus1", "Bus2", 30.0, 0.25),
-        ("Bus1", "Bus3", 150.0, 0.25),
-        ("Bus2", "Bus3", 150.0, 0.25),
+        ("Bus1", "Bus2", 30.0, 0.25, 0.05),
+        ("Bus1", "Bus3", 150.0, 0.25, 0.05),
+        ("Bus2", "Bus3", 150.0, 0.25, 0.05),
     ],
-    columns=["from_bus_id", "to_bus_id", "capacity", "reactance"],
+    columns=["from_bus_id", "to_bus_id", "capacity", "reactance", "resistance"],
 )
 offers = DataFrame(
     [

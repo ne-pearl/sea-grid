@@ -48,7 +48,7 @@ buses["lmp_total"] = [-c.dual_value for c in balance_constraints]
 print(problem)
 print(f"Optimal dispatch cost: ${problem.value:.2f} / h")
 
-# ====================================================================================
+# =========================================================================
 
 offer_dispatch = offers["dispatch"]
 line_flow = lines["flow"]
@@ -108,3 +108,14 @@ buses.loc[free_bus_ids, "lmp_congestion"] = SF.T @ (mu_upper - mu_lower)
 assert np.allclose(p.value, offers["dispatch"])
 assert np.allclose(f.value, lines["flow"])
 print(f"Optimal dispatch cost: ${problem.value:.2f} / h")
+
+# =========================================================================
+
+# At each line: d(loss)/df = d(sum(r*f*f|ell))/(df|ell) = (2*r*f)|ell
+# Evaluate this forumula using the base line flow:
+line_loss_gradient = 2 * np.diag(lines["resistance"]) @ lines["flow"]
+
+
+# f = SF @ p ==> df/dp = SF
+# LF = [d(loss)/df]*[df/dp] = d(loss)/df @ SF
+LF = line_loss_gradient @ SF
